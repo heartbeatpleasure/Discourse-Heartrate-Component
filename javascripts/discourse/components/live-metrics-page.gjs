@@ -56,12 +56,12 @@ function liveAgeSeconds(live, nowMs) {
 }
 
 function freshnessLabel(status, age) {
-  if (status === "live" && age !== null) {
-    return `Live · ${age}s ago`;
+  if (status === "live") {
+    return "Live now";
   }
 
   if (status === "delayed" && age !== null) {
-    return `Delayed · ${age}s ago`;
+    return `Last signal ${formatAge(age)} ago`;
   }
 
   if (status === "stale") {
@@ -77,6 +77,25 @@ function freshnessLabel(status, age) {
   }
 
   return "Unavailable";
+}
+
+function formatAge(seconds) {
+  const safeSeconds = Math.max(Number(seconds) || 0, 0);
+
+  if (safeSeconds < 60) {
+    return `${safeSeconds}s`;
+  }
+
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds % 60;
+
+  if (minutes < 60) {
+    return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
 export default class LiveMetricsPage extends Component {
