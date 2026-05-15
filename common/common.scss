@@ -431,3 +431,11 @@
     }
   }
 }
+
+.live-metrics-provider-error {
+  display: block;
+  max-width: 38rem;
+  margin-top: 0.2rem;
+  color: var(--danger);
+  line-height: 1.35;
+}

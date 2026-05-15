@@ -38,7 +38,8 @@ function decorateAccount(account, nowMs = Date.now()) {
     visibility_staff: visibility === "staff",
     bpm_label: heartRate ? `${heartRate} BPM` : "—",
     status_class: `live-metrics-status--${status}`,
-    freshness_label: freshnessLabel(status, age),
+    freshness_label: freshnessLabel(status, age, account.provider),
+    live_error: live.error,
   };
 }
 
@@ -57,7 +58,7 @@ function liveAgeSeconds(live, nowMs) {
   return Number.isFinite(live?.age_seconds) ? live.age_seconds : null;
 }
 
-function freshnessLabel(status, age) {
+function freshnessLabel(status, age, provider) {
   if (status === "live") {
     return "Live now";
   }
@@ -75,7 +76,7 @@ function freshnessLabel(status, age) {
   }
 
   if (status === "unauthorized") {
-    return "Reconnect required";
+    return provider === "hyperate" ? "Connection rejected" : "Reconnect required";
   }
 
   return "Unavailable";
@@ -113,9 +114,11 @@ export default class LiveMetricsPage extends Component {
   @tracked notice = null;
   @tracked nowMs = Date.now();
   @tracked hyperateDeviceId = "";
+  @tracked userInteracting = false;
 
   pollTimer = null;
   clockTimer = null;
+  interactionResumeTimer = null;
 
   willDestroy() {
     if (super.willDestroy) {
@@ -196,6 +199,7 @@ export default class LiveMetricsPage extends Component {
   cleanup() {
     this.stopPolling();
     this.stopClock();
+    this.stopInteractionResumeTimer();
   }
 
   readUrlNotice() {
@@ -263,7 +267,14 @@ export default class LiveMetricsPage extends Component {
 
   startPolling() {
     this.stopPolling();
-    this.pollTimer = window.setTimeout(() => this.loadAll(), this.pollIntervalMs);
+    this.pollTimer = window.setTimeout(() => {
+      if (this.userInteracting || this.settingsFocusWithin()) {
+        this.startPolling();
+        return;
+      }
+
+      this.loadAll();
+    }, this.pollIntervalMs);
   }
 
   startClock() {
@@ -288,6 +299,22 @@ export default class LiveMetricsPage extends Component {
     }
   }
 
+  stopInteractionResumeTimer() {
+    if (this.interactionResumeTimer) {
+      window.clearTimeout(this.interactionResumeTimer);
+      this.interactionResumeTimer = null;
+    }
+  }
+
+  settingsFocusWithin() {
+    try {
+      const activeElement = document.activeElement;
+      return Boolean(activeElement?.closest?.(".live-metrics-card--settings"));
+    } catch {
+      return false;
+    }
+  }
+
   get pollIntervalMs() {
     const seconds = Number(this.config?.poll_interval_seconds || 6);
     return Math.max(3, Math.min(seconds, 60)) * 1000;
@@ -302,6 +329,20 @@ export default class LiveMetricsPage extends Component {
   @action
   updateHyperateDeviceId(event) {
     this.hyperateDeviceId = event.target.value;
+  }
+
+  @action
+  beginSettingsInteraction() {
+    this.stopInteractionResumeTimer();
+    this.userInteracting = true;
+  }
+
+  @action
+  endSettingsInteraction() {
+    this.stopInteractionResumeTimer();
+    this.interactionResumeTimer = window.setTimeout(() => {
+      this.userInteracting = false;
+    }, 800);
   }
 
   @action
@@ -426,7 +467,7 @@ export default class LiveMetricsPage extends Component {
         <div class="live-metrics-card live-metrics-muted">Loading heartrate data…</div>
       {{else}}
         <section class="live-metrics-grid">
-          <article class="live-metrics-card live-metrics-card--settings">
+          <article class="live-metrics-card live-metrics-card--settings" {{on "focusin" this.beginSettingsInteraction}} {{on "focusout" this.endSettingsInteraction}}>
             <div class="live-metrics-card__header">
               <div>
                 <h2>My connections</h2>
@@ -449,6 +490,9 @@ export default class LiveMetricsPage extends Component {
                         <strong>{{provider.label}}</strong>
                         {{#if provider.connected}}
                           <p>Connected</p>
+                          {{#if provider.account.live_error}}
+                            <small class="live-metrics-provider-error">{{provider.account.live_error}}</small>
+                          {{/if}}
                         {{else}}
                           {{#if provider.configured}}
                             <p>Available</p>
