@@ -240,11 +240,6 @@ export default class LiveMetricsPage extends Component {
   }
 
   @action
-  async toggleProfile(event) {
-    await this.saveSettings({ show_on_profile: event.target.checked });
-  }
-
-  @action
   async toggleDirectory(event) {
     await this.saveSettings({ show_in_directory: event.target.checked });
   }
@@ -282,18 +277,20 @@ export default class LiveMetricsPage extends Component {
           <p class="live-metrics-eyebrow">Connected apps</p>
           <h1>{{this.title}}</h1>
           <p>
-            Share live heart-rate data from connected providers in one consistent community overview. Connect your provider, choose where your current heart rate is visible, and show live status without publishing your history.
+            Connect heart-rate providers and share live readings in a consistent community layout. You control where your current heart rate is visible, while your history stays private.
           </p>
         </div>
 
         <div class="live-metrics-hero__status">
           {{#if this.account}}
             <div class="live-metrics-bpm {{this.account.status_class}}">
+              <span class="live-metrics-bpm__label">Your live preview</span>
               <span class="live-metrics-bpm__value">{{this.account.bpm_label}}</span>
               <span class="live-metrics-bpm__meta">{{this.account.freshness_label}}</span>
             </div>
           {{else}}
             <div class="live-metrics-bpm live-metrics-status--inactive">
+              <span class="live-metrics-bpm__label">Your live preview</span>
               <span class="live-metrics-bpm__value">Not connected</span>
               <span class="live-metrics-bpm__meta">Connect a provider to show live data.</span>
             </div>
@@ -317,7 +314,7 @@ export default class LiveMetricsPage extends Component {
             <div class="live-metrics-card__header">
               <div>
                 <h2>My connections</h2>
-                <p>Connect your Pulsoid account and decide where your current heart rate may be shown.</p>
+                <p>Connect your Pulsoid account and decide whether your current heart rate may appear in the community overview.</p>
               </div>
             </div>
 
@@ -346,11 +343,6 @@ export default class LiveMetricsPage extends Component {
 
               <div class="live-metrics-settings-list">
                 <label class="live-metrics-toggle">
-                  <input type="checkbox" checked={{this.account.show_on_profile}} disabled={{this.saving}} {{on "change" this.toggleProfile}} />
-                  <span>Allow display on my profile</span>
-                </label>
-
-                <label class="live-metrics-toggle">
                   <input type="checkbox" checked={{this.account.show_in_directory}} disabled={{this.saving}} {{on "change" this.toggleDirectory}} />
                   <span>Show on the Heartrate overview</span>
                 </label>
@@ -363,7 +355,7 @@ export default class LiveMetricsPage extends Component {
                     <option value="public" selected={{this.account.visibility_public}}>Public</option>
                     <option value="staff" selected={{this.account.visibility_staff}}>Staff only</option>
                   </select>
-                  <small class="live-metrics-field__help">This applies wherever you allow your heart rate to be shown.</small>
+                  <small class="live-metrics-field__help">This applies to the Heartrate overview.</small>
                 </label>
               </div>
             {{else}}
@@ -377,25 +369,22 @@ export default class LiveMetricsPage extends Component {
             {{/if}}
           </article>
 
-          <article class="live-metrics-card live-metrics-card--current">
+          <article class="live-metrics-card live-metrics-card--info">
             <div class="live-metrics-card__header">
               <div>
-                <h2>Current live data</h2>
-                <p>Short-lived live data from the provider API. Only a tiny cache is used to reduce API calls.</p>
+                <h2>How sharing works</h2>
+                <p>The live card at the top is your personal preview. These settings decide whether that same live status may be shown to others.</p>
               </div>
               {{#if this.refreshing}}
                 <span class="live-metrics-pill">Refreshing…</span>
               {{/if}}
             </div>
 
-            {{#if this.account}}
-              <div class="live-metrics-current-reading {{this.account.status_class}}">
-                <span class="live-metrics-current-reading__number">{{this.account.bpm_label}}</span>
-                <span class="live-metrics-current-reading__status">{{this.account.freshness_label}}</span>
-              </div>
-            {{else}}
-              <p class="live-metrics-muted">Connect a provider to preview your own live card here.</p>
-            {{/if}}
+            <ul class="live-metrics-info-list">
+              <li>The overview is opt-in and only shows users who enabled it.</li>
+              <li>Visibility controls who may see your live heart-rate data.</li>
+              <li>Historical heart-rate data is not published here.</li>
+            </ul>
           </article>
         </section>
 

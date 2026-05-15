@@ -108,6 +108,14 @@
   color: var(--primary);
 }
 
+.live-metrics-bpm__label {
+  color: var(--primary-medium);
+  font-size: var(--font-down-1);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .live-metrics-bpm__meta,
 .live-metrics-current-reading__status {
   color: var(--primary-medium);
@@ -224,6 +232,19 @@
   color: var(--primary-medium);
   font-size: var(--font-down-1);
   font-weight: 400;
+}
+
+
+.live-metrics-info-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--primary-medium);
+
+  li {
+    line-height: 1.4;
+  }
 }
 
 .live-metrics-empty-state {
