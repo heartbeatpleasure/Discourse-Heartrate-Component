@@ -373,3 +373,61 @@
     width: 100%;
   }
 }
+
+.live-metrics-provider-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.live-metrics-provider-card {
+  display: grid;
+  gap: 0.85rem;
+  padding: 0.9rem;
+  border: 1px solid var(--primary-low);
+  border-radius: 16px;
+  background: var(--primary-very-low);
+
+  .live-metrics-provider-row {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    margin-bottom: 0;
+  }
+
+  .live-metrics-settings-list {
+    border-top: 1px solid var(--primary-low);
+    padding-top: 0.85rem;
+  }
+}
+
+.live-metrics-connect-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+
+  input[type="text"] {
+    max-width: 320px;
+    border: 1px solid var(--primary-low);
+    border-radius: 10px;
+    background: var(--secondary);
+    color: var(--primary);
+    padding: 0.45rem 0.6rem;
+  }
+}
+
+.live-metrics-inline-warning--compact {
+  margin-bottom: 0;
+}
+
+@media screen and (max-width: 760px) {
+  .live-metrics-connect-form {
+    grid-template-columns: 1fr;
+
+    input[type="text"] {
+      max-width: none;
+      width: 100%;
+    }
+  }
+}

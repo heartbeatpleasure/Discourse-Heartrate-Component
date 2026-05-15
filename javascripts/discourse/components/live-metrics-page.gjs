@@ -6,6 +6,7 @@ import didInsert from "@ember/render-modifiers/modifiers/did-insert";
 import { ajax } from "discourse/lib/ajax";
 import I18n from "I18n";
 
+const PROVIDER_ORDER = ["pulsoid", "hyperate"];
 
 function decorateAccount(account, nowMs = Date.now()) {
   if (!account) {
@@ -105,10 +106,12 @@ export default class LiveMetricsPage extends Component {
   @tracked loading = true;
   @tracked refreshing = false;
   @tracked saving = false;
-  @tracked disconnecting = false;
+  @tracked disconnectingProvider = null;
+  @tracked connectingHyperate = false;
   @tracked error = null;
   @tracked notice = null;
   @tracked nowMs = Date.now();
+  @tracked hyperateDeviceId = "";
 
   pollTimer = null;
   clockTimer = null;
@@ -124,45 +127,57 @@ export default class LiveMetricsPage extends Component {
     return I18n.t("live_metrics.title");
   }
 
+  get accounts() {
+    const accounts = this.me?.accounts || (this.me?.account ? [this.me.account] : []);
+    return accounts.map((account) => decorateAccount(account, this.nowMs)).filter(Boolean);
+  }
+
   get account() {
-    return decorateAccount(this.me?.account, this.nowMs);
+    return this.accounts.find((account) => account.live?.status === "live") || this.accounts[0] || null;
   }
 
   get directory() {
     return (this.directoryRows || []).map((row) => decorateAccount(row, this.nowMs));
   }
 
-  get isConnected() {
-    return Boolean(this.me?.account?.connected);
+  get providerRows() {
+    const providers = this.config?.providers || {};
+
+    return PROVIDER_ORDER.filter((provider) => providers[provider]?.enabled === true).map((provider) => {
+      const config = providers[provider] || {};
+      const account = this.accounts.find((item) => item.provider === provider) || null;
+      const isPulsoid = provider === "pulsoid";
+      const isHyperate = provider === "hyperate";
+      const connecting = isHyperate ? this.connectingHyperate : false;
+      const disconnecting = this.disconnectingProvider === provider;
+
+      return {
+        provider,
+        label: config.label || account?.provider_label || provider,
+        configured: config.configured === true,
+        account,
+        connected: Boolean(account?.connected),
+        isPulsoid,
+        isHyperate,
+        connect_url: config.connect_url,
+        connect_disabled: !config.configured || connecting || this.databaseNotReady,
+        disconnecting,
+        connecting,
+      };
+    });
   }
 
-  get providerConfigured() {
-    return this.config?.providers?.pulsoid?.configured === true;
+  get hasEnabledProviders() {
+    return this.providerRows.length > 0;
   }
 
-  get providerEnabled() {
-    return this.config?.providers?.pulsoid?.enabled !== false;
-  }
-
-  get connectUrl() {
-    return this.config?.providers?.pulsoid?.connect_url || "/live-metrics/auth/pulsoid/start";
-  }
-
-  get connectDisabled() {
-    return !this.providerConfigured;
-  }
-
-  get pollIntervalMs() {
-    const seconds = Number(this.config?.poll_interval_seconds || 6);
-    return Math.max(3, Math.min(seconds, 60)) * 1000;
+  get hyperateConnectDisabled() {
+    const provider = this.config?.providers?.hyperate;
+    return provider?.configured !== true || this.connectingHyperate || this.databaseNotReady || this.hyperateDeviceId.trim().length === 0;
   }
 
   get directoryEnabled() {
     return this.config?.directory_enabled !== false;
-  }
-
-  get showConfiguredWarning() {
-    return this.providerEnabled && !this.providerConfigured;
   }
 
   get databaseNotReady() {
@@ -238,7 +253,7 @@ export default class LiveMetricsPage extends Component {
       this.nowMs = Date.now();
       this.startPolling();
     } catch {
-      this.error = "Live metrics could not be loaded. Please refresh the page or contact staff.";
+      this.error = "Heartrate data could not be loaded. Please refresh the page or contact staff.";
     } finally {
       this.loading = false;
       this.refreshing = false;
@@ -272,43 +287,85 @@ export default class LiveMetricsPage extends Component {
     }
   }
 
-  @action
-  connectPulsoid() {
-    window.location.href = this.connectUrl;
+  get pollIntervalMs() {
+    const seconds = Number(this.config?.poll_interval_seconds || 6);
+    return Math.max(3, Math.min(seconds, 60)) * 1000;
   }
 
   @action
-  async disconnectPulsoid() {
-    if (this.disconnecting) {
+  connectPulsoid() {
+    const url = this.config?.providers?.pulsoid?.connect_url || "/live-metrics/api/connect/pulsoid";
+    window.location.href = url;
+  }
+
+  @action
+  updateHyperateDeviceId(event) {
+    this.hyperateDeviceId = event.target.value;
+  }
+
+  @action
+  async connectHyperate(event) {
+    event?.preventDefault?.();
+
+    const deviceId = this.hyperateDeviceId.trim();
+    if (!deviceId || this.connectingHyperate) {
       return;
     }
 
-    this.disconnecting = true;
+    this.connectingHyperate = true;
     this.error = null;
 
     try {
-      await ajax("/live-metrics/auth/pulsoid", { type: "DELETE" });
-      this.notice = "Pulsoid disconnected.";
+      this.me = await ajax("/live-metrics/api/connect/hyperate", {
+        type: "PUT",
+        data: { device_id: deviceId },
+      });
+      this.hyperateDeviceId = "";
+      this.notice = "HypeRate connected. Choose where your live data may be shown.";
       await this.loadAll();
-    } catch {
-      this.error = "Pulsoid could not be disconnected. Please try again.";
+    } catch (error) {
+      this.error = error?.jqXHR?.responseJSON?.message || "HypeRate could not be connected. Check the device ID and try again.";
     } finally {
-      this.disconnecting = false;
+      this.connectingHyperate = false;
     }
   }
 
   @action
-  async toggleDirectory(event) {
-    await this.saveSettings({ show_in_directory: event.target.checked });
+  async disconnectProvider(provider) {
+    if (this.disconnectingProvider) {
+      return;
+    }
+
+    this.disconnectingProvider = provider;
+    this.error = null;
+
+    const label = provider === "hyperate" ? "HypeRate" : "Pulsoid";
+    const url = provider === "hyperate" ? "/live-metrics/api/connect/hyperate" : "/live-metrics/auth/pulsoid";
+
+    try {
+      await ajax(url, { type: "DELETE" });
+      this.notice = `${label} disconnected.`;
+      await this.loadAll();
+    } catch {
+      this.error = `${label} could not be disconnected. Please try again.`;
+    } finally {
+      this.disconnectingProvider = null;
+    }
   }
 
   @action
-  async changeVisibility(event) {
-    await this.saveSettings({ visibility: event.target.value });
+  async toggleDirectory(provider, event) {
+    await this.saveSettings(provider, { show_in_directory: event.target.checked });
   }
 
-  async saveSettings(changes) {
-    if (!this.isConnected || this.saving) {
+  @action
+  async changeVisibility(provider, event) {
+    await this.saveSettings(provider, { visibility: event.target.value });
+  }
+
+  async saveSettings(provider, changes) {
+    const account = this.accounts.find((item) => item.provider === provider);
+    if (!account?.connected || this.saving) {
       return;
     }
 
@@ -316,13 +373,13 @@ export default class LiveMetricsPage extends Component {
     this.error = null;
 
     try {
-      this.me = await ajax("/live-metrics/api/me/settings", {
+      this.me = await ajax(`/live-metrics/api/accounts/${provider}/settings`, {
         type: "PUT",
         data: changes,
       });
       await this.loadAll();
     } catch {
-      this.error = "Your live metrics settings could not be saved.";
+      this.error = "Your heartrate settings could not be saved.";
     } finally {
       this.saving = false;
     }
@@ -344,7 +401,7 @@ export default class LiveMetricsPage extends Component {
             <div class="live-metrics-bpm {{this.account.status_class}}">
               <span class="live-metrics-bpm__label">Your live preview</span>
               <span class="live-metrics-bpm__value">{{this.account.bpm_label}}</span>
-              <span class="live-metrics-bpm__meta">{{this.account.freshness_label}}</span>
+              <span class="live-metrics-bpm__meta">{{this.account.provider_label}} · {{this.account.freshness_label}}</span>
             </div>
           {{else}}
             <div class="live-metrics-bpm live-metrics-status--inactive">
@@ -372,15 +429,9 @@ export default class LiveMetricsPage extends Component {
             <div class="live-metrics-card__header">
               <div>
                 <h2>My connections</h2>
-                <p>Connect your Pulsoid account and decide whether your current heart rate may appear in the community overview.</p>
+                <p>Connect one or more providers and decide whether your current heart rate may appear in the community overview.</p>
               </div>
             </div>
-
-            {{#if this.showConfiguredWarning}}
-              <div class="live-metrics-inline-warning">
-                Pulsoid is enabled, but the OAuth client ID and secret are not configured yet.
-              </div>
-            {{/if}}
 
             {{#if this.databaseNotReady}}
               <div class="live-metrics-inline-warning">
@@ -388,41 +439,84 @@ export default class LiveMetricsPage extends Component {
               </div>
             {{/if}}
 
-            {{#if this.account}}
-              <div class="live-metrics-provider-row">
-                <div>
-                  <strong>Pulsoid</strong>
-                  <p>Connected</p>
-                </div>
-                <button type="button" class="btn btn-danger" disabled={{this.disconnecting}} {{on "click" this.disconnectPulsoid}}>
-                  {{#if this.disconnecting}}Disconnecting…{{else}}Disconnect{{/if}}
-                </button>
-              </div>
+            {{#if this.hasEnabledProviders}}
+              <div class="live-metrics-provider-list">
+                {{#each this.providerRows as |provider|}}
+                  <section class="live-metrics-provider-card">
+                    <div class="live-metrics-provider-row">
+                      <div>
+                        <strong>{{provider.label}}</strong>
+                        {{#if provider.connected}}
+                          <p>Connected</p>
+                        {{else}}
+                          {{#if provider.configured}}
+                            <p>Available</p>
+                          {{else}}
+                            <p>Not configured yet</p>
+                          {{/if}}
+                        {{/if}}
+                      </div>
 
-              <div class="live-metrics-settings-list">
-                <label class="live-metrics-toggle">
-                  <input type="checkbox" checked={{this.account.show_in_directory}} disabled={{this.saving}} {{on "change" this.toggleDirectory}} />
-                  <span>Show on the Heartrate overview</span>
-                </label>
+                      {{#if provider.connected}}
+                        <button type="button" class="btn btn-danger" disabled={{provider.disconnecting}} {{on "click" (fn this.disconnectProvider provider.provider)}}>
+                          {{#if provider.disconnecting}}Disconnecting…{{else}}Disconnect{{/if}}
+                        </button>
+                      {{else}}
+                        {{#if provider.isPulsoid}}
+                          <button type="button" class="btn btn-primary" disabled={{provider.connect_disabled}} {{on "click" this.connectPulsoid}}>
+                            Connect your Pulsoid account
+                          </button>
+                        {{/if}}
+                      {{/if}}
+                    </div>
 
-                <label class="live-metrics-field">
-                  <span>Who can see my heart-rate data</span>
-                  <select disabled={{this.saving}} {{on "change" this.changeVisibility}}>
-                    <option value="private" selected={{this.account.visibility_private}}>Only me</option>
-                    <option value="logged_in" selected={{this.account.visibility_logged_in}}>Logged-in users</option>
-                    <option value="public" selected={{this.account.visibility_public}}>Public</option>
-                    <option value="staff" selected={{this.account.visibility_staff}}>Staff only</option>
-                  </select>
-                  <small class="live-metrics-field__help">This applies to the Heartrate overview.</small>
-                </label>
+                    {{#unless provider.configured}}
+                      <div class="live-metrics-inline-warning live-metrics-inline-warning--compact">
+                        {{provider.label}} is enabled, but the required server-side settings are not configured yet.
+                      </div>
+                    {{/unless}}
+
+                    {{#if provider.isHyperate}}
+                      {{#unless provider.connected}}
+                        <form class="live-metrics-connect-form" {{on "submit" this.connectHyperate}}>
+                          <label class="live-metrics-field">
+                            <span>HypeRate device ID</span>
+                            <input type="text" value={{this.hyperateDeviceId}} disabled={{provider.connect_disabled}} {{on "input" this.updateHyperateDeviceId}} placeholder="Enter your HypeRate device ID" />
+                            <small class="live-metrics-field__help">Use the device/user ID provided by HypeRate. The site API key stays server-side.</small>
+                          </label>
+                          <button type="submit" class="btn btn-primary" disabled={{this.hyperateConnectDisabled}}>
+                            {{#if provider.connecting}}Connecting…{{else}}Connect HypeRate{{/if}}
+                          </button>
+                        </form>
+                      {{/unless}}
+                    {{/if}}
+
+                    {{#if provider.account}}
+                      <div class="live-metrics-settings-list">
+                        <label class="live-metrics-toggle">
+                          <input type="checkbox" checked={{provider.account.show_in_directory}} disabled={{this.saving}} {{on "change" (fn this.toggleDirectory provider.provider)}} />
+                          <span>Show on the Heartrate overview</span>
+                        </label>
+
+                        <label class="live-metrics-field">
+                          <span>Who can see my heart-rate data</span>
+                          <select disabled={{this.saving}} {{on "change" (fn this.changeVisibility provider.provider)}}>
+                            <option value="private" selected={{provider.account.visibility_private}}>Only me</option>
+                            <option value="logged_in" selected={{provider.account.visibility_logged_in}}>Logged-in users</option>
+                            <option value="public" selected={{provider.account.visibility_public}}>Public</option>
+                            <option value="staff" selected={{provider.account.visibility_staff}}>Staff only</option>
+                          </select>
+                          <small class="live-metrics-field__help">This applies to the Heartrate overview for {{provider.label}}.</small>
+                        </label>
+                      </div>
+                    {{/if}}
+                  </section>
+                {{/each}}
               </div>
             {{else}}
               <div class="live-metrics-empty-state">
-                <h3>No provider connected yet</h3>
-                <p>Connect your Pulsoid account through OAuth. You do not need to create a paid manual Pulsoid API token for this flow.</p>
-                <button type="button" class="btn btn-primary" disabled={{this.connectDisabled}} {{on "click" this.connectPulsoid}}>
-                  Connect your Pulsoid account
-                </button>
+                <h3>No providers enabled yet</h3>
+                <p>An administrator can enable Pulsoid, HypeRate, or both in the Heartrate plugin settings.</p>
               </div>
             {{/if}}
           </article>
