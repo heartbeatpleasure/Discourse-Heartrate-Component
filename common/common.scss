@@ -1,0 +1,346 @@
+.live-metrics-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+
+  h1,
+  h2,
+  h3,
+  p {
+    margin-top: 0;
+  }
+}
+
+.live-metrics-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 1.25rem;
+  align-items: stretch;
+  margin-bottom: 1rem;
+
+  h1 {
+    font-size: clamp(2rem, 5vw, 4rem);
+    line-height: 1;
+    margin: 0 0 0.75rem;
+  }
+
+  p {
+    color: var(--primary-medium);
+    font-size: var(--font-up-1);
+    max-width: 760px;
+  }
+}
+
+.live-metrics-hero__copy,
+.live-metrics-hero__status,
+.live-metrics-card {
+  background: var(--secondary);
+  border: 1px solid var(--primary-low);
+  border-radius: 18px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.live-metrics-hero__copy {
+  padding: 2rem;
+}
+
+.live-metrics-hero__status {
+  padding: 1rem;
+  display: flex;
+  align-items: stretch;
+}
+
+.live-metrics-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-weight: 700;
+  font-size: var(--font-down-1);
+  color: var(--tertiary) !important;
+  margin-bottom: 0.75rem;
+}
+
+.live-metrics-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.live-metrics-card {
+  padding: 1.25rem;
+}
+
+.live-metrics-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+
+  h2 {
+    margin-bottom: 0.35rem;
+  }
+
+  p {
+    color: var(--primary-medium);
+    margin-bottom: 0;
+  }
+}
+
+.live-metrics-bpm,
+.live-metrics-current-reading {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 16px;
+  padding: 1.25rem;
+  background: var(--primary-very-low);
+  border: 1px solid var(--primary-low);
+}
+
+.live-metrics-bpm__value,
+.live-metrics-current-reading__number {
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 800;
+  line-height: 1;
+  color: var(--primary);
+}
+
+.live-metrics-bpm__meta,
+.live-metrics-current-reading__status {
+  color: var(--primary-medium);
+  font-size: var(--font-down-1);
+}
+
+.live-metrics-status--live {
+  border-color: var(--success);
+
+  .live-metrics-bpm__meta,
+  .live-metrics-current-reading__status,
+  strong + span {
+    color: var(--success);
+  }
+}
+
+.live-metrics-status--delayed {
+  border-color: var(--tertiary);
+
+  .live-metrics-bpm__meta,
+  .live-metrics-current-reading__status,
+  strong + span {
+    color: var(--tertiary);
+  }
+}
+
+.live-metrics-status--stale,
+.live-metrics-status--no_data,
+.live-metrics-status--unavailable,
+.live-metrics-status--unauthorized,
+.live-metrics-status--inactive {
+  opacity: 0.88;
+}
+
+.live-metrics-alert {
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--primary-low);
+}
+
+.live-metrics-alert--success {
+  background: var(--success-low);
+  border-color: var(--success);
+}
+
+.live-metrics-alert--error,
+.live-metrics-inline-warning {
+  background: var(--danger-low);
+  border-color: var(--danger);
+}
+
+.live-metrics-inline-warning {
+  border: 1px solid var(--danger);
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.live-metrics-provider-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem;
+  border: 1px solid var(--primary-low);
+  border-radius: 14px;
+  background: var(--primary-very-low);
+  margin-bottom: 1rem;
+
+  p {
+    margin: 0.15rem 0 0;
+    color: var(--primary-medium);
+  }
+}
+
+.live-metrics-settings-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.live-metrics-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.75rem;
+  border: 1px solid var(--primary-low);
+  border-radius: 12px;
+  cursor: pointer;
+
+  input {
+    margin-top: 0.2rem;
+  }
+}
+
+.live-metrics-field {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 700;
+
+  select {
+    max-width: 280px;
+    border: 1px solid var(--primary-low);
+    border-radius: 10px;
+    background: var(--secondary);
+    color: var(--primary);
+    padding: 0.45rem 0.6rem;
+  }
+}
+
+.live-metrics-empty-state {
+  border: 1px dashed var(--primary-low-mid);
+  border-radius: 16px;
+  padding: 1.25rem;
+  background: var(--primary-very-low);
+
+  h3 {
+    margin-bottom: 0.35rem;
+  }
+
+  p {
+    color: var(--primary-medium);
+  }
+}
+
+.live-metrics-empty-state--small {
+  text-align: center;
+}
+
+.live-metrics-muted {
+  color: var(--primary-medium);
+}
+
+.live-metrics-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.25rem 0.6rem;
+  font-size: var(--font-down-1);
+  font-weight: 700;
+  background: var(--primary-very-low);
+  color: var(--primary-medium);
+  white-space: nowrap;
+}
+
+.live-metrics-directory {
+  margin-top: 1rem;
+}
+
+.live-metrics-directory__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 0.85rem;
+}
+
+.live-metrics-person-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+  color: var(--primary);
+  text-decoration: none;
+  border: 1px solid var(--primary-low);
+  border-radius: 16px;
+  padding: 0.85rem;
+  background: var(--primary-very-low);
+
+  &:hover {
+    border-color: var(--tertiary);
+    text-decoration: none;
+  }
+}
+
+.live-metrics-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--primary-low);
+}
+
+.live-metrics-person-card__main,
+.live-metrics-person-card__reading {
+  min-width: 0;
+}
+
+.live-metrics-person-card__name {
+  display: block;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-metrics-person-card__provider,
+.live-metrics-person-card__reading span {
+  display: block;
+  color: var(--primary-medium);
+  font-size: var(--font-down-1);
+}
+
+.live-metrics-person-card__reading {
+  grid-column: 1 / -1;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--primary-low);
+
+  strong {
+    font-size: var(--font-up-2);
+  }
+}
+
+@media screen and (max-width: 760px) {
+  .live-metrics-page {
+    padding: 1rem 0.75rem 2rem;
+  }
+
+  .live-metrics-hero,
+  .live-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .live-metrics-hero__copy,
+  .live-metrics-card {
+    padding: 1rem;
+  }
+
+  .live-metrics-card__header,
+  .live-metrics-provider-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .live-metrics-field select {
+    max-width: none;
+    width: 100%;
+  }
+}

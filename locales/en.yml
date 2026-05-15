@@ -1,0 +1,5 @@
+en:
+  theme_metadata:
+    description: "Heartrate sharing"
+  live_metrics:
+    title: "Heartrate"

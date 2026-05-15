@@ -1,0 +1,432 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { action } from "@ember/object";
+import { on } from "@ember/modifier";
+import didInsert from "@ember/render-modifiers/modifiers/did-insert";
+import { ajax } from "discourse/lib/ajax";
+import I18n from "I18n";
+
+function decorateAccount(account) {
+  if (!account) {
+    return null;
+  }
+
+  const live = account.live || {};
+  const status = live.status || "unavailable";
+  const heartRate = live.heart_rate;
+  const age = Number.isFinite(live.age_seconds) ? live.age_seconds : null;
+
+  const user = account.user
+    ? {
+        ...account.user,
+        avatar_url: String(account.user.avatar_template || "").replace("{size}", "64"),
+      }
+    : null;
+
+  return {
+    ...account,
+    user,
+    bpm_label: heartRate ? `${heartRate} BPM` : "—",
+    status_class: `live-metrics-status--${status}`,
+    freshness_label: freshnessLabel(status, age),
+  };
+}
+
+function freshnessLabel(status, age) {
+  if (status === "live" && age !== null) {
+    return `Live · ${age}s ago`;
+  }
+
+  if (status === "delayed" && age !== null) {
+    return `Delayed · ${age}s ago`;
+  }
+
+  if (status === "stale") {
+    return "No recent signal";
+  }
+
+  if (status === "no_data") {
+    return "No heart-rate data yet";
+  }
+
+  if (status === "unauthorized") {
+    return "Reconnect required";
+  }
+
+  return "Unavailable";
+}
+
+export default class LiveMetricsPage extends Component {
+  @tracked config = null;
+  @tracked me = null;
+  @tracked directory = [];
+  @tracked loading = true;
+  @tracked refreshing = false;
+  @tracked saving = false;
+  @tracked disconnecting = false;
+  @tracked error = null;
+  @tracked notice = null;
+
+  pollTimer = null;
+
+  willDestroy() {
+    if (super.willDestroy) {
+      super.willDestroy(...arguments);
+    }
+    this.cleanup();
+  }
+
+  get title() {
+    return I18n.t("live_metrics.title");
+  }
+
+  get account() {
+    return decorateAccount(this.me?.account);
+  }
+
+  get isConnected() {
+    return Boolean(this.me?.account?.connected);
+  }
+
+  get providerConfigured() {
+    return this.config?.providers?.pulsoid?.configured === true;
+  }
+
+  get providerEnabled() {
+    return this.config?.providers?.pulsoid?.enabled !== false;
+  }
+
+  get connectUrl() {
+    return this.config?.providers?.pulsoid?.connect_url || "/live-metrics/auth/pulsoid/start";
+  }
+
+  get visibilityOptions() {
+    return this.config?.visibility_options || [];
+  }
+
+  get connectDisabled() {
+    return !this.providerConfigured;
+  }
+
+  get pollIntervalMs() {
+    const seconds = Number(this.config?.poll_interval_seconds || 6);
+    return Math.max(3, Math.min(seconds, 60)) * 1000;
+  }
+
+  get directoryEnabled() {
+    return this.config?.directory_enabled !== false;
+  }
+
+  get showConfiguredWarning() {
+    return this.providerEnabled && !this.providerConfigured;
+  }
+
+  get databaseNotReady() {
+    return this.config?.database_ready === false;
+  }
+
+  @action
+  setup() {
+    this.readUrlNotice();
+    this.loadAll({ initial: true });
+  }
+
+  @action
+  cleanup() {
+    this.stopPolling();
+  }
+
+  readUrlNotice() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const connected = params.get("connected");
+      const error = params.get("error");
+
+      if (connected === "pulsoid") {
+        this.notice = "Pulsoid connected. Choose where your live data may be shown.";
+      }
+
+      if (error) {
+        this.error = this.errorMessage(error);
+      }
+    } catch {
+      // Ignore malformed location data.
+    }
+  }
+
+  errorMessage(errorKey) {
+    switch (errorKey) {
+      case "pulsoid_not_configured":
+        return "Pulsoid is not configured yet. An administrator must add the OAuth client ID and secret first.";
+      case "oauth_state_mismatch":
+        return "Pulsoid could not be connected because the OAuth session expired. Please try again.";
+      case "missing_authorization_code":
+        return "Pulsoid did not return an authorization code. Please try again.";
+      case "pulsoid_connect_failed":
+        return "Pulsoid could not be connected. Please try again or contact staff.";
+      default:
+        return "The live metrics action could not be completed.";
+    }
+  }
+
+  async loadAll({ initial = false } = {}) {
+    this.error = null;
+    if (initial) {
+      this.loading = true;
+    } else {
+      this.refreshing = true;
+    }
+
+    try {
+      const config = await ajax("/live-metrics/api/config");
+      const me = await ajax("/live-metrics/api/me");
+
+      let directory = { users: [] };
+      if (config?.directory_enabled !== false) {
+        directory = await ajax("/live-metrics/api/directory");
+      }
+
+      this.config = config;
+      this.me = me;
+      this.directory = (directory?.users || []).map((row) => decorateAccount(row));
+      this.startPolling();
+    } catch {
+      this.error = "Live metrics could not be loaded. Please refresh the page or contact staff.";
+    } finally {
+      this.loading = false;
+      this.refreshing = false;
+    }
+  }
+
+  startPolling() {
+    this.stopPolling();
+    this.pollTimer = window.setTimeout(() => this.loadAll(), this.pollIntervalMs);
+  }
+
+  stopPolling() {
+    if (this.pollTimer) {
+      window.clearTimeout(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  @action
+  connectPulsoid() {
+    window.location.href = this.connectUrl;
+  }
+
+  @action
+  async disconnectPulsoid() {
+    if (this.disconnecting) {
+      return;
+    }
+
+    this.disconnecting = true;
+    this.error = null;
+
+    try {
+      await ajax("/live-metrics/auth/pulsoid", { type: "DELETE" });
+      this.notice = "Pulsoid disconnected.";
+      await this.loadAll();
+    } catch {
+      this.error = "Pulsoid could not be disconnected. Please try again.";
+    } finally {
+      this.disconnecting = false;
+    }
+  }
+
+  @action
+  async toggleProfile(event) {
+    await this.saveSettings({ show_on_profile: event.target.checked });
+  }
+
+  @action
+  async toggleDirectory(event) {
+    await this.saveSettings({ show_in_directory: event.target.checked });
+  }
+
+  @action
+  async changeVisibility(event) {
+    await this.saveSettings({ visibility: event.target.value });
+  }
+
+  async saveSettings(changes) {
+    if (!this.isConnected || this.saving) {
+      return;
+    }
+
+    this.saving = true;
+    this.error = null;
+
+    try {
+      this.me = await ajax("/live-metrics/api/me/settings", {
+        type: "PUT",
+        data: changes,
+      });
+      await this.loadAll();
+    } catch {
+      this.error = "Your live metrics settings could not be saved.";
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  <template>
+    <div class="live-metrics-page" {{didInsert this.setup}}>
+      <section class="live-metrics-hero">
+        <div class="live-metrics-hero__copy">
+          <p class="live-metrics-eyebrow">Connected apps</p>
+          <h1>{{this.title}}</h1>
+          <p>
+            Share heart-rate data from connected providers in a consistent community layout. This proof of concept supports Pulsoid heart-rate data first, without storing heart-rate history in Discourse.
+          </p>
+        </div>
+
+        <div class="live-metrics-hero__status">
+          {{#if this.account}}
+            <div class="live-metrics-bpm {{this.account.status_class}}">
+              <span class="live-metrics-bpm__value">{{this.account.bpm_label}}</span>
+              <span class="live-metrics-bpm__meta">{{this.account.freshness_label}}</span>
+            </div>
+          {{else}}
+            <div class="live-metrics-bpm live-metrics-status--inactive">
+              <span class="live-metrics-bpm__value">Not connected</span>
+              <span class="live-metrics-bpm__meta">Connect a provider to show live data.</span>
+            </div>
+          {{/if}}
+        </div>
+      </section>
+
+      {{#if this.notice}}
+        <div class="live-metrics-alert live-metrics-alert--success">{{this.notice}}</div>
+      {{/if}}
+
+      {{#if this.error}}
+        <div class="live-metrics-alert live-metrics-alert--error">{{this.error}}</div>
+      {{/if}}
+
+      {{#if this.loading}}
+        <div class="live-metrics-card live-metrics-muted">Loading heartrate data…</div>
+      {{else}}
+        <section class="live-metrics-grid">
+          <article class="live-metrics-card live-metrics-card--settings">
+            <div class="live-metrics-card__header">
+              <div>
+                <h2>My connections</h2>
+                <p>Connect your Pulsoid account and decide where your current heart rate may be shown.</p>
+              </div>
+            </div>
+
+            {{#if this.showConfiguredWarning}}
+              <div class="live-metrics-inline-warning">
+                Pulsoid is enabled, but the OAuth client ID and secret are not configured yet.
+              </div>
+            {{/if}}
+
+            {{#if this.databaseNotReady}}
+              <div class="live-metrics-inline-warning">
+                Heartrate database table is not ready yet. Please run Discourse migrations and restart/rebuild.
+              </div>
+            {{/if}}
+
+            {{#if this.account}}
+              <div class="live-metrics-provider-row">
+                <div>
+                  <strong>Pulsoid</strong>
+                  <p>Connected as {{this.account.display_name}}</p>
+                </div>
+                <button type="button" class="btn btn-danger" disabled={{this.disconnecting}} {{on "click" this.disconnectPulsoid}}>
+                  {{#if this.disconnecting}}Disconnecting…{{else}}Disconnect{{/if}}
+                </button>
+              </div>
+
+              <div class="live-metrics-settings-list">
+                <label class="live-metrics-toggle">
+                  <input type="checkbox" checked={{this.account.show_on_profile}} disabled={{this.saving}} {{on "change" this.toggleProfile}} />
+                  <span>Show on my profile when profile placement is enabled</span>
+                </label>
+
+                <label class="live-metrics-toggle">
+                  <input type="checkbox" checked={{this.account.show_in_directory}} disabled={{this.saving}} {{on "change" this.toggleDirectory}} />
+                  <span>Show on the Heartrate overview</span>
+                </label>
+
+                <label class="live-metrics-field">
+                  <span>Visibility</span>
+                  <select value={{this.account.visibility}} disabled={{this.saving}} {{on "change" this.changeVisibility}}>
+                    {{#each this.visibilityOptions as |option|}}
+                      <option value={{option.id}}>{{option.label}}</option>
+                    {{/each}}
+                  </select>
+                </label>
+              </div>
+            {{else}}
+              <div class="live-metrics-empty-state">
+                <h3>No provider connected yet</h3>
+                <p>Connect your Pulsoid account through OAuth. You do not need to create a paid manual Pulsoid API token for this flow.</p>
+                <button type="button" class="btn btn-primary" disabled={{this.connectDisabled}} {{on "click" this.connectPulsoid}}>
+                  Connect your Pulsoid account
+                </button>
+              </div>
+            {{/if}}
+          </article>
+
+          <article class="live-metrics-card live-metrics-card--current">
+            <div class="live-metrics-card__header">
+              <div>
+                <h2>Current live data</h2>
+                <p>Short-lived data from the provider API. Discourse only keeps a tiny cache to reduce API calls.</p>
+              </div>
+              {{#if this.refreshing}}
+                <span class="live-metrics-pill">Refreshing…</span>
+              {{/if}}
+            </div>
+
+            {{#if this.account}}
+              <div class="live-metrics-current-reading {{this.account.status_class}}">
+                <span class="live-metrics-current-reading__number">{{this.account.bpm_label}}</span>
+                <span class="live-metrics-current-reading__status">{{this.account.freshness_label}}</span>
+              </div>
+            {{else}}
+              <p class="live-metrics-muted">Connect a provider to preview your own live card here.</p>
+            {{/if}}
+          </article>
+        </section>
+
+        {{#if this.directoryEnabled}}
+          <section class="live-metrics-card live-metrics-directory">
+            <div class="live-metrics-card__header">
+              <div>
+                <h2>Community overview</h2>
+                <p>Users who explicitly opted in to the overview. Live users are shown first.</p>
+              </div>
+            </div>
+
+            {{#if this.directory.length}}
+              <div class="live-metrics-directory__grid">
+                {{#each this.directory as |row|}}
+                  <a class="live-metrics-person-card" href={{row.user.profile_url}}>
+                    <img class="live-metrics-avatar" src={{row.user.avatar_url}} alt="" />
+                    <div class="live-metrics-person-card__main">
+                      <span class="live-metrics-person-card__name">{{row.user.username}}</span>
+                      <span class="live-metrics-person-card__provider">{{row.provider_label}}</span>
+                    </div>
+                    <div class="live-metrics-person-card__reading {{row.status_class}}">
+                      <strong>{{row.bpm_label}}</strong>
+                      <span>{{row.freshness_label}}</span>
+                    </div>
+                  </a>
+                {{/each}}
+              </div>
+            {{else}}
+              <div class="live-metrics-empty-state live-metrics-empty-state--small">
+                <h3>No visible heartrate data yet</h3>
+                <p>Connected users appear here only after they opt in to the overview.</p>
+              </div>
+            {{/if}}
+          </section>
+        {{/if}}
+      {{/if}}
+    </div>
+  </template>
+}
