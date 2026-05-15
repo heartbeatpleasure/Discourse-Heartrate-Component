@@ -375,9 +375,6 @@ export default class LiveMetricsPage extends Component {
                 <h2>How sharing works</h2>
                 <p>The live card at the top is your personal preview. These settings decide whether that same live status may be shown to others.</p>
               </div>
-              {{#if this.refreshing}}
-                <span class="live-metrics-pill">Refreshing…</span>
-              {{/if}}
             </div>
 
             <ul class="live-metrics-info-list">
