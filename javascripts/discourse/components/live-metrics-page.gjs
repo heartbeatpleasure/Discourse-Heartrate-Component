@@ -7,7 +7,7 @@ import { ajax } from "discourse/lib/ajax";
 import I18n from "I18n";
 
 
-function decorateAccount(account) {
+function decorateAccount(account, nowMs = Date.now()) {
   if (!account) {
     return null;
   }
@@ -15,7 +15,7 @@ function decorateAccount(account) {
   const live = account.live || {};
   const status = live.status || "unavailable";
   const heartRate = live.heart_rate;
-  const age = Number.isFinite(live.age_seconds) ? live.age_seconds : null;
+  const age = liveAgeSeconds(live, nowMs);
 
   const user = account.user
     ? {
@@ -38,6 +38,21 @@ function decorateAccount(account) {
     status_class: `live-metrics-status--${status}`,
     freshness_label: freshnessLabel(status, age),
   };
+}
+
+function liveAgeSeconds(live, nowMs) {
+  const measuredAtMs = Number(live?.measured_at_ms);
+
+  if (Number.isFinite(measuredAtMs) && measuredAtMs > 0) {
+    return Math.max(Math.floor((nowMs - measuredAtMs) / 1000), 0);
+  }
+
+  const measuredAt = Date.parse(live?.measured_at || "");
+  if (Number.isFinite(measuredAt)) {
+    return Math.max(Math.floor((nowMs - measuredAt) / 1000), 0);
+  }
+
+  return Number.isFinite(live?.age_seconds) ? live.age_seconds : null;
 }
 
 function freshnessLabel(status, age) {
@@ -67,15 +82,17 @@ function freshnessLabel(status, age) {
 export default class LiveMetricsPage extends Component {
   @tracked config = null;
   @tracked me = null;
-  @tracked directory = [];
+  @tracked directoryRows = [];
   @tracked loading = true;
   @tracked refreshing = false;
   @tracked saving = false;
   @tracked disconnecting = false;
   @tracked error = null;
   @tracked notice = null;
+  @tracked nowMs = Date.now();
 
   pollTimer = null;
+  clockTimer = null;
 
   willDestroy() {
     if (super.willDestroy) {
@@ -89,7 +106,11 @@ export default class LiveMetricsPage extends Component {
   }
 
   get account() {
-    return decorateAccount(this.me?.account);
+    return decorateAccount(this.me?.account, this.nowMs);
+  }
+
+  get directory() {
+    return (this.directoryRows || []).map((row) => decorateAccount(row, this.nowMs));
   }
 
   get isConnected() {
@@ -132,12 +153,14 @@ export default class LiveMetricsPage extends Component {
   @action
   setup() {
     this.readUrlNotice();
+    this.startClock();
     this.loadAll({ initial: true });
   }
 
   @action
   cleanup() {
     this.stopPolling();
+    this.stopClock();
   }
 
   readUrlNotice() {
@@ -192,7 +215,8 @@ export default class LiveMetricsPage extends Component {
 
       this.config = config;
       this.me = me;
-      this.directory = (directory?.users || []).map((row) => decorateAccount(row));
+      this.directoryRows = directory?.users || [];
+      this.nowMs = Date.now();
       this.startPolling();
     } catch {
       this.error = "Live metrics could not be loaded. Please refresh the page or contact staff.";
@@ -207,10 +231,25 @@ export default class LiveMetricsPage extends Component {
     this.pollTimer = window.setTimeout(() => this.loadAll(), this.pollIntervalMs);
   }
 
+  startClock() {
+    this.stopClock();
+    this.nowMs = Date.now();
+    this.clockTimer = window.setInterval(() => {
+      this.nowMs = Date.now();
+    }, 1000);
+  }
+
   stopPolling() {
     if (this.pollTimer) {
       window.clearTimeout(this.pollTimer);
       this.pollTimer = null;
+    }
+  }
+
+  stopClock() {
+    if (this.clockTimer) {
+      window.clearInterval(this.clockTimer);
+      this.clockTimer = null;
     }
   }
 
