@@ -218,6 +218,14 @@
   }
 }
 
+.live-metrics-field__help {
+  display: block;
+  max-width: 420px;
+  color: var(--primary-medium);
+  font-size: var(--font-down-1);
+  font-weight: 400;
+}
+
 .live-metrics-empty-state {
   border: 1px dashed var(--primary-low-mid);
   border-radius: 16px;

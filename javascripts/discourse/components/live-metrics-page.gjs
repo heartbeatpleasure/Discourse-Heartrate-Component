@@ -6,6 +6,7 @@ import didInsert from "@ember/render-modifiers/modifiers/did-insert";
 import { ajax } from "discourse/lib/ajax";
 import I18n from "I18n";
 
+
 function decorateAccount(account) {
   if (!account) {
     return null;
@@ -23,9 +24,16 @@ function decorateAccount(account) {
       }
     : null;
 
+  const visibility = account.visibility || "private";
+
   return {
     ...account,
     user,
+    visibility,
+    visibility_private: visibility === "private",
+    visibility_logged_in: visibility === "logged_in",
+    visibility_public: visibility === "public",
+    visibility_staff: visibility === "staff",
     bpm_label: heartRate ? `${heartRate} BPM` : "—",
     status_class: `live-metrics-status--${status}`,
     freshness_label: freshnessLabel(status, age),
@@ -98,10 +106,6 @@ export default class LiveMetricsPage extends Component {
 
   get connectUrl() {
     return this.config?.providers?.pulsoid?.connect_url || "/live-metrics/auth/pulsoid/start";
-  }
-
-  get visibilityOptions() {
-    return this.config?.visibility_options || [];
   }
 
   get connectDisabled() {
@@ -278,7 +282,7 @@ export default class LiveMetricsPage extends Component {
           <p class="live-metrics-eyebrow">Connected apps</p>
           <h1>{{this.title}}</h1>
           <p>
-            Share heart-rate data from connected providers in a consistent community layout. This proof of concept supports Pulsoid heart-rate data first, without storing heart-rate history in Discourse.
+            Share live heart-rate data from connected providers in one consistent community overview. Connect your provider, choose where your current heart rate is visible, and show live status without publishing your history.
           </p>
         </div>
 
@@ -333,7 +337,7 @@ export default class LiveMetricsPage extends Component {
               <div class="live-metrics-provider-row">
                 <div>
                   <strong>Pulsoid</strong>
-                  <p>Connected as {{this.account.display_name}}</p>
+                  <p>Connected</p>
                 </div>
                 <button type="button" class="btn btn-danger" disabled={{this.disconnecting}} {{on "click" this.disconnectPulsoid}}>
                   {{#if this.disconnecting}}Disconnecting…{{else}}Disconnect{{/if}}
@@ -343,7 +347,7 @@ export default class LiveMetricsPage extends Component {
               <div class="live-metrics-settings-list">
                 <label class="live-metrics-toggle">
                   <input type="checkbox" checked={{this.account.show_on_profile}} disabled={{this.saving}} {{on "change" this.toggleProfile}} />
-                  <span>Show on my profile when profile placement is enabled</span>
+                  <span>Allow display on my profile</span>
                 </label>
 
                 <label class="live-metrics-toggle">
@@ -352,12 +356,14 @@ export default class LiveMetricsPage extends Component {
                 </label>
 
                 <label class="live-metrics-field">
-                  <span>Visibility</span>
-                  <select value={{this.account.visibility}} disabled={{this.saving}} {{on "change" this.changeVisibility}}>
-                    {{#each this.visibilityOptions as |option|}}
-                      <option value={{option.id}}>{{option.label}}</option>
-                    {{/each}}
+                  <span>Who can see my heart-rate data</span>
+                  <select disabled={{this.saving}} {{on "change" this.changeVisibility}}>
+                    <option value="private" selected={{this.account.visibility_private}}>Only me</option>
+                    <option value="logged_in" selected={{this.account.visibility_logged_in}}>Logged-in users</option>
+                    <option value="public" selected={{this.account.visibility_public}}>Public</option>
+                    <option value="staff" selected={{this.account.visibility_staff}}>Staff only</option>
                   </select>
+                  <small class="live-metrics-field__help">This applies wherever you allow your heart rate to be shown.</small>
                 </label>
               </div>
             {{else}}
@@ -375,7 +381,7 @@ export default class LiveMetricsPage extends Component {
             <div class="live-metrics-card__header">
               <div>
                 <h2>Current live data</h2>
-                <p>Short-lived data from the provider API. Discourse only keeps a tiny cache to reduce API calls.</p>
+                <p>Short-lived live data from the provider API. Only a tiny cache is used to reduce API calls.</p>
               </div>
               {{#if this.refreshing}}
                 <span class="live-metrics-pill">Refreshing…</span>
