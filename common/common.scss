@@ -439,3 +439,29 @@
   color: var(--danger);
   line-height: 1.35;
 }
+
+.live-metrics-provider-card--active {
+  border-color: var(--tertiary);
+}
+
+.live-metrics-toggle--radio {
+  align-items: flex-start;
+
+  input {
+    margin-top: 0.25rem;
+  }
+
+  span {
+    display: grid;
+    gap: 0.2rem;
+  }
+}
+
+.live-metrics-provider-note {
+  margin: 0;
+  padding: 0.35rem 0.1rem 0;
+}
+
+.live-metrics-status--loading {
+  opacity: 0.9;
+}
