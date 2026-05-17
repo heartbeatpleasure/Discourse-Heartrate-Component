@@ -9,7 +9,7 @@ import I18n from "I18n";
 
 const PROVIDER_ORDER = ["pulsoid", "hyperate"];
 
-function decorateConnectionAccount(account) {
+function decorateSettingsAccount(account) {
   if (!account) {
     return null;
   }
@@ -28,7 +28,7 @@ function decorateConnectionAccount(account) {
   };
 }
 
-function decorateLiveAccount(account, nowMs = Date.now()) {
+function decorateAccount(account, nowMs = Date.now()) {
   if (!account) {
     return null;
   }
@@ -37,7 +37,6 @@ function decorateLiveAccount(account, nowMs = Date.now()) {
   const status = live.status || "unavailable";
   const heartRate = live.heart_rate;
   const age = liveAgeSeconds(live, nowMs);
-  const connectionAccount = decorateConnectionAccount(account);
 
   const user = account.user
     ? {
@@ -47,7 +46,7 @@ function decorateLiveAccount(account, nowMs = Date.now()) {
     : null;
 
   return {
-    ...connectionAccount,
+    ...decorateSettingsAccount(account),
     user,
     row_key: `${account.provider || "provider"}:${account.user?.id || account.user?.username || account.provider_uid || "self"}`,
     bpm_label: heartRate ? `${heartRate} BPM` : "—",
@@ -72,10 +71,6 @@ function liveAgeSeconds(live, nowMs) {
 }
 
 function freshnessLabel(status, age, provider) {
-  if (status === "loading") {
-    return "Loading live preview…";
-  }
-
   if (status === "live") {
     return "Live now";
   }
@@ -121,15 +116,14 @@ function formatAge(seconds) {
 export default class LiveMetricsPage extends Component {
   @tracked config = null;
   @tracked me = null;
-  @tracked livePreviewAccount = null;
+  @tracked liveAccount = null;
   @tracked directoryRows = [];
   @tracked loading = true;
   @tracked refreshing = false;
-  @tracked liveSectionsLoading = false;
-  @tracked directoryLoading = false;
   @tracked saving = false;
   @tracked disconnectingProvider = null;
   @tracked connectingHyperate = false;
+  @tracked activatingProvider = null;
   @tracked error = null;
   @tracked notice = null;
   @tracked nowMs = Date.now();
@@ -149,36 +143,24 @@ export default class LiveMetricsPage extends Component {
     return I18n.t("live_metrics.title");
   }
 
-  get connectionAccounts() {
-    const accounts = this.me?.accounts || (this.me?.account ? [this.me.account] : []);
-    return accounts.map((account) => decorateConnectionAccount(account)).filter(Boolean);
+  get rawAccounts() {
+    return this.me?.accounts || (this.me?.account ? [this.me.account] : []);
   }
 
-  get activeConnectionAccount() {
-    return this.connectionAccounts.find((account) => account.active) || this.connectionAccounts[0] || null;
+  get settingsAccounts() {
+    return this.rawAccounts.map((account) => decorateSettingsAccount(account)).filter(Boolean);
+  }
+
+  get activeSettingsAccount() {
+    return this.settingsAccounts.find((account) => account.active) || this.settingsAccounts[0] || null;
   }
 
   get account() {
-    if (this.livePreviewAccount) {
-      return decorateLiveAccount(this.livePreviewAccount, this.nowMs);
-    }
-
-    const account = this.activeConnectionAccount;
-    if (!account?.connected) {
-      return null;
-    }
-
-    return decorateLiveAccount(
-      {
-        ...account,
-        live: { status: this.liveSectionsLoading ? "loading" : "unavailable" },
-      },
-      this.nowMs
-    );
+    return decorateAccount(this.liveAccount || this.activeSettingsAccount, this.nowMs);
   }
 
   get directory() {
-    return (this.directoryRows || []).map((row) => decorateLiveAccount(row, this.nowMs));
+    return (this.directoryRows || []).map((row) => decorateAccount(row, this.nowMs));
   }
 
   get providerRows() {
@@ -186,11 +168,12 @@ export default class LiveMetricsPage extends Component {
 
     return PROVIDER_ORDER.filter((provider) => providers[provider]?.enabled === true).map((provider) => {
       const config = providers[provider] || {};
-      const account = this.connectionAccounts.find((item) => item.provider === provider) || null;
+      const account = this.settingsAccounts.find((item) => item.provider === provider) || null;
       const isPulsoid = provider === "pulsoid";
       const isHyperate = provider === "hyperate";
       const connecting = isHyperate ? this.connectingHyperate : false;
       const disconnecting = this.disconnectingProvider === provider;
+      const activating = this.activatingProvider === provider;
 
       return {
         provider,
@@ -198,16 +181,21 @@ export default class LiveMetricsPage extends Component {
         configured: config.configured === true,
         account,
         connected: Boolean(account?.connected),
-        active: Boolean(account?.active),
-        card_class: account?.active ? "live-metrics-provider-card live-metrics-provider-card--active" : "live-metrics-provider-card",
+        active: account?.active === true,
         isPulsoid,
         isHyperate,
         connect_url: config.connect_url,
         connect_disabled: !config.configured || connecting || this.databaseNotReady,
         disconnecting,
         connecting,
+        activating,
+        activate_disabled: this.saving || activating,
       };
     });
+  }
+
+  get connectedProviderCount() {
+    return this.providerRows.filter((provider) => provider.connected).length;
   }
 
   get hasEnabledProviders() {
@@ -227,11 +215,16 @@ export default class LiveMetricsPage extends Component {
     return this.config?.database_ready === false;
   }
 
+  get pollIntervalMs() {
+    const seconds = Number(this.config?.poll_interval_seconds || 3);
+    return Math.max(1, Math.min(seconds, 60)) * 1000;
+  }
+
   @action
   setup() {
     this.readUrlNotice();
     this.startClock();
-    this.loadAll({ initial: true });
+    this.loadInitial();
   }
 
   @action
@@ -247,7 +240,7 @@ export default class LiveMetricsPage extends Component {
       const error = params.get("error");
 
       if (connected === "pulsoid") {
-        this.notice = "Pulsoid connected. Choose where your live data may be shown.";
+        this.notice = "Pulsoid connected and selected as your active provider.";
       }
 
       if (error) {
@@ -269,69 +262,72 @@ export default class LiveMetricsPage extends Component {
       case "pulsoid_connect_failed":
         return "Pulsoid could not be connected. Please try again or contact staff.";
       default:
-        return "The live metrics action could not be completed.";
+        return "The heartrate action could not be completed.";
     }
   }
 
-  async loadAll({ initial = false } = {}) {
+  async loadInitial() {
     this.error = null;
-    if (initial) {
-      this.loading = true;
-    }
+    this.loading = true;
 
     try {
       const [config, me] = await Promise.all([
         ajax("/live-metrics/api/config"),
-        ajax("/live-metrics/api/me?include_live=false&include_statistics=false"),
+        ajax("/live-metrics/api/me"),
       ]);
 
       this.config = config;
       this.me = me;
-      this.nowMs = Date.now();
+      this.loading = false;
       this.startPolling();
-      this.refreshLiveSections({ initial: true });
+      this.refreshLiveSections();
     } catch {
-      this.error = "Heartrate data could not be loaded. Please refresh the page or contact staff.";
-    } finally {
+      this.error = "Heartrate settings could not be loaded. Please refresh the page or contact staff.";
       this.loading = false;
     }
   }
 
-  async refreshLiveSections({ initial = false } = {}) {
-    if (this.liveSectionsLoading) {
+  async loadSettings() {
+    const [config, me] = await Promise.all([
+      ajax("/live-metrics/api/config"),
+      ajax("/live-metrics/api/me"),
+    ]);
+
+    this.config = config;
+    this.me = me;
+  }
+
+  async refreshLiveSections() {
+    if (!this.config) {
       return;
     }
 
-    this.liveSectionsLoading = true;
-    this.refreshing = !initial;
-    this.directoryLoading = this.directoryEnabled && this.directoryRows.length === 0;
+    this.refreshing = true;
 
     try {
-      const live = await ajax("/live-metrics/api/me/live");
-      this.livePreviewAccount = live?.account || null;
-      this.nowMs = Date.now();
+      const liveRequest = ajax("/live-metrics/api/live-preview");
+      const directoryRequest = this.config?.directory_enabled === false ? Promise.resolve({ users: [] }) : ajax("/live-metrics/api/directory");
+      const [liveResult, directoryResult] = await Promise.allSettled([liveRequest, directoryRequest]);
 
-      if (this.directoryEnabled) {
-        const directory = await ajax("/live-metrics/api/directory");
-        this.directoryRows = directory?.users || [];
-        this.nowMs = Date.now();
+      if (liveResult.status === "fulfilled") {
+        this.liveAccount = liveResult.value?.account || null;
       }
-    } catch {
-      if (initial && !this.livePreviewAccount && !this.directoryRows.length) {
-        this.error = "Live heartrate data could not be refreshed yet. The page settings are still available.";
+
+      if (directoryResult.status === "fulfilled") {
+        this.directoryRows = directoryResult.value?.users || [];
       }
+
+      this.nowMs = Date.now();
     } finally {
-      this.liveSectionsLoading = false;
       this.refreshing = false;
-      this.directoryLoading = false;
+      this.startPolling();
     }
   }
 
   startPolling() {
     this.stopPolling();
-    this.pollTimer = window.setTimeout(async () => {
-      await this.refreshLiveSections();
-      this.startPolling();
+    this.pollTimer = window.setTimeout(() => {
+      this.refreshLiveSections();
     }, this.pollIntervalMs);
   }
 
@@ -355,11 +351,6 @@ export default class LiveMetricsPage extends Component {
       window.clearInterval(this.clockTimer);
       this.clockTimer = null;
     }
-  }
-
-  get pollIntervalMs() {
-    const seconds = Number(this.config?.poll_interval_seconds || 6);
-    return Math.max(3, Math.min(seconds, 60)) * 1000;
   }
 
   @action
@@ -391,9 +382,8 @@ export default class LiveMetricsPage extends Component {
         data: { device_id: deviceId },
       });
       this.hyperateDeviceId = "";
-      this.livePreviewAccount = null;
-      this.notice = "HypeRate connected. Choose where your live data may be shown.";
-      this.refreshLiveSections({ initial: true });
+      this.notice = "HypeRate connected and selected as your active provider.";
+      await this.refreshLiveSections();
     } catch (error) {
       this.error = error?.jqXHR?.responseJSON?.message || "HypeRate could not be connected. Check the device ID and try again.";
     } finally {
@@ -416,8 +406,8 @@ export default class LiveMetricsPage extends Component {
     try {
       await ajax(url, { type: "DELETE" });
       this.notice = `${label} disconnected.`;
-      this.livePreviewAccount = null;
-      await this.loadAll();
+      await this.loadSettings();
+      await this.refreshLiveSections();
     } catch {
       this.error = `${label} could not be disconnected. Please try again.`;
     } finally {
@@ -426,31 +416,27 @@ export default class LiveMetricsPage extends Component {
   }
 
   @action
-  async activateProvider(provider, event) {
-    if (event?.target?.checked === false || this.saving) {
+  async activateProvider(provider) {
+    if (this.activatingProvider || this.activeSettingsAccount?.provider === provider) {
       return;
     }
 
-    const account = this.connectionAccounts.find((item) => item.provider === provider);
-    if (!account?.connected || account.active) {
-      return;
-    }
-
-    this.saving = true;
+    this.activatingProvider = provider;
     this.error = null;
-    this.livePreviewAccount = null;
 
     try {
       this.me = await ajax(`/live-metrics/api/accounts/${provider}/activate`, {
         type: "PUT",
       });
-      this.notice = `${account.provider_label || provider} is now your active heartrate source.`;
-      this.refreshLiveSections({ initial: true });
+      const label = provider === "hyperate" ? "HypeRate" : "Pulsoid";
+      this.notice = `${label} is now your active provider.`;
+      this.liveAccount = null;
+      await this.refreshLiveSections();
     } catch (error) {
-      this.error = error?.jqXHR?.responseJSON?.message || "The active heartrate provider could not be changed.";
-      event.target.checked = Boolean(account.active);
+      this.error = error?.jqXHR?.responseJSON?.message || "Your active provider could not be changed.";
+      await this.loadSettings();
     } finally {
-      this.saving = false;
+      this.activatingProvider = null;
     }
   }
 
@@ -465,7 +451,7 @@ export default class LiveMetricsPage extends Component {
   }
 
   async saveSettings(provider, changes) {
-    const account = this.connectionAccounts.find((item) => item.provider === provider);
+    const account = this.settingsAccounts.find((item) => item.provider === provider);
     if (!account?.connected || this.saving) {
       return;
     }
@@ -478,9 +464,10 @@ export default class LiveMetricsPage extends Component {
         type: "PUT",
         data: changes,
       });
-      this.refreshLiveSections({ initial: true });
+      await this.refreshLiveSections();
     } catch (error) {
       this.error = error?.jqXHR?.responseJSON?.message || "Your heartrate settings could not be saved.";
+      await this.loadSettings();
     } finally {
       this.saving = false;
     }
@@ -493,7 +480,7 @@ export default class LiveMetricsPage extends Component {
           <p class="live-metrics-eyebrow">Connected apps</p>
           <h1>{{this.title}}</h1>
           <p>
-            Connect heart-rate providers and share live readings in a consistent community layout. You control which provider is active and where your current heart rate is visible, while your history stays private.
+            Connect heart-rate providers and share live readings in a consistent community layout. Choose one active provider, control who can see it, and keep your history private.
           </p>
         </div>
 
@@ -530,7 +517,7 @@ export default class LiveMetricsPage extends Component {
             <div class="live-metrics-card__header">
               <div>
                 <h2>My connections</h2>
-                <p>Connect one or more providers, then choose one active source for your live preview and community overview.</p>
+                <p>Connect one or more providers, then choose which one is currently active.</p>
               </div>
             </div>
 
@@ -543,16 +530,12 @@ export default class LiveMetricsPage extends Component {
             {{#if this.hasEnabledProviders}}
               <div class="live-metrics-provider-list">
                 {{#each this.providerRows key="provider" as |provider|}}
-                  <section class={{provider.card_class}}>
+                  <section class="live-metrics-provider-card {{if provider.active "live-metrics-provider-card--active"}}">
                     <div class="live-metrics-provider-row">
                       <div>
                         <strong>{{provider.label}}</strong>
                         {{#if provider.connected}}
-                          {{#if provider.active}}
-                            <p>Connected · Active source</p>
-                          {{else}}
-                            <p>Connected · Not active</p>
-                          {{/if}}
+                          <p>{{if provider.active "Connected · active" "Connected"}}</p>
                           {{#if provider.account.live_error}}
                             <small class="live-metrics-provider-error">{{provider.account.live_error}}</small>
                           {{/if}}
@@ -601,15 +584,15 @@ export default class LiveMetricsPage extends Component {
 
                     {{#if provider.account}}
                       <div class="live-metrics-settings-list">
-                        <label class="live-metrics-toggle live-metrics-toggle--radio">
-                          <input type="radio" name="live-metrics-active-provider" checked={{provider.account.active}} disabled={{this.saving}} {{on "change" (fn this.activateProvider provider.provider)}} />
+                        <label class="live-metrics-toggle live-metrics-toggle--active-provider">
+                          <input type="radio" name="active-heartrate-provider" checked={{provider.active}} disabled={{provider.activate_disabled}} {{on "change" (fn this.activateProvider provider.provider)}} />
                           <span>
-                            Use this provider as my active source
-                            <small class="live-metrics-field__help">Only one connected provider can be active at a time.</small>
+                            <strong>Use as active provider</strong>
+                            <small>Only the active provider is used for your live preview and community overview.</small>
                           </span>
                         </label>
 
-                        {{#if provider.account.active}}
+                        {{#if provider.active}}
                           <label class="live-metrics-toggle">
                             <input type="checkbox" checked={{provider.account.show_in_directory}} disabled={{this.saving}} {{on "change" (fn this.toggleDirectory provider.provider)}} />
                             <span>Show on the Heartrate overview</span>
@@ -623,10 +606,10 @@ export default class LiveMetricsPage extends Component {
                               <option value="public" selected={{provider.account.visibility_public}}>Public</option>
                               <option value="staff" selected={{provider.account.visibility_staff}}>Staff only</option>
                             </select>
-                            <small class="live-metrics-field__help">This applies to the active provider on the Heartrate overview.</small>
+                            <small class="live-metrics-field__help">This applies to the Heartrate overview for your active provider.</small>
                           </label>
                         {{else}}
-                          <p class="live-metrics-muted live-metrics-provider-note">Make this provider active before using it for your live preview or overview.</p>
+                          <p class="live-metrics-muted live-metrics-muted--small">Sharing settings are available after making this provider active.</p>
                         {{/if}}
                       </div>
                     {{/if}}
@@ -650,9 +633,8 @@ export default class LiveMetricsPage extends Component {
             </div>
 
             <ul class="live-metrics-info-list">
-              <li>You can connect multiple providers, but only one can be the active source.</li>
-              <li>The overview is opt-in and only shows users who enabled it for their active provider.</li>
-              <li>Visibility controls who may see your live heart-rate data.</li>
+              <li>You can connect multiple providers, but only one can be active at a time.</li>
+              <li>The overview is opt-in and only uses your active provider.</li>
               <li>Historical heart-rate data is not published here.</li>
             </ul>
           </article>
@@ -665,9 +647,6 @@ export default class LiveMetricsPage extends Component {
                 <h2>Community overview</h2>
                 <p>Users who explicitly opted in to the overview. Live users are shown first.</p>
               </div>
-              {{#if this.refreshing}}
-                <span class="live-metrics-pill">Refreshing…</span>
-              {{/if}}
             </div>
 
             {{#if this.directory.length}}
@@ -688,13 +667,8 @@ export default class LiveMetricsPage extends Component {
               </div>
             {{else}}
               <div class="live-metrics-empty-state live-metrics-empty-state--small">
-                {{#if this.directoryLoading}}
-                  <h3>Loading community overview…</h3>
-                  <p>Live data is loading in the background.</p>
-                {{else}}
-                  <h3>No visible heartrate data yet</h3>
-                  <p>Connected users appear here only after they opt in to the overview.</p>
-                {{/if}}
+                <h3>No visible heartrate data yet</h3>
+                <p>Connected users appear here only after they opt in to the overview.</p>
               </div>
             {{/if}}
           </section>

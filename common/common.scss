@@ -441,27 +441,26 @@
 }
 
 .live-metrics-provider-card--active {
-  border-color: var(--tertiary);
+  border-color: var(--success);
 }
 
-.live-metrics-toggle--radio {
+.live-metrics-toggle--active-provider {
   align-items: flex-start;
 
-  input {
-    margin-top: 0.25rem;
+  strong,
+  small {
+    display: block;
   }
 
-  span {
-    display: grid;
-    gap: 0.2rem;
+  small {
+    margin-top: 0.15rem;
+    color: var(--primary-medium);
+    font-size: var(--font-down-1);
+    font-weight: 400;
   }
 }
 
-.live-metrics-provider-note {
+.live-metrics-muted--small {
   margin: 0;
-  padding: 0.35rem 0.1rem 0;
-}
-
-.live-metrics-status--loading {
-  opacity: 0.9;
+  font-size: var(--font-down-1);
 }
