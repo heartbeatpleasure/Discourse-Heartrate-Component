@@ -49,6 +49,7 @@ function decorateLiveAccount(account, nowMs = Date.now()) {
   return {
     ...connectionAccount,
     user,
+    row_key: `${account.provider || "provider"}:${account.user?.id || account.user?.username || account.provider_uid || "self"}`,
     bpm_label: heartRate ? `${heartRate} BPM` : "—",
     status_class: `live-metrics-status--${status}`,
     freshness_label: freshnessLabel(status, age, account.provider),
@@ -426,12 +427,31 @@ export default class LiveMetricsPage extends Component {
 
   @action
   async activateProvider(provider, event) {
-    if (event?.target?.checked === false) {
+    if (event?.target?.checked === false || this.saving) {
       return;
     }
 
+    const account = this.connectionAccounts.find((item) => item.provider === provider);
+    if (!account?.connected || account.active) {
+      return;
+    }
+
+    this.saving = true;
+    this.error = null;
     this.livePreviewAccount = null;
-    await this.saveSettings(provider, { active: true });
+
+    try {
+      this.me = await ajax(`/live-metrics/api/accounts/${provider}/activate`, {
+        type: "PUT",
+      });
+      this.notice = `${account.provider_label || provider} is now your active heartrate source.`;
+      this.refreshLiveSections({ initial: true });
+    } catch (error) {
+      this.error = error?.jqXHR?.responseJSON?.message || "The active heartrate provider could not be changed.";
+      event.target.checked = Boolean(account.active);
+    } finally {
+      this.saving = false;
+    }
   }
 
   @action
@@ -459,8 +479,8 @@ export default class LiveMetricsPage extends Component {
         data: changes,
       });
       this.refreshLiveSections({ initial: true });
-    } catch {
-      this.error = "Your heartrate settings could not be saved.";
+    } catch (error) {
+      this.error = error?.jqXHR?.responseJSON?.message || "Your heartrate settings could not be saved.";
     } finally {
       this.saving = false;
     }
@@ -522,7 +542,7 @@ export default class LiveMetricsPage extends Component {
 
             {{#if this.hasEnabledProviders}}
               <div class="live-metrics-provider-list">
-                {{#each this.providerRows as |provider|}}
+                {{#each this.providerRows key="provider" as |provider|}}
                   <section class={{provider.card_class}}>
                     <div class="live-metrics-provider-row">
                       <div>
@@ -652,7 +672,7 @@ export default class LiveMetricsPage extends Component {
 
             {{#if this.directory.length}}
               <div class="live-metrics-directory__grid">
-                {{#each this.directory as |row|}}
+                {{#each this.directory key="row_key" as |row|}}
                   <a class="live-metrics-person-card" href={{row.user.profile_url}}>
                     <img class="live-metrics-avatar" src={{row.user.avatar_url}} alt="" />
                     <div class="live-metrics-person-card__main">
