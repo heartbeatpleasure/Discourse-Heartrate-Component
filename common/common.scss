@@ -288,13 +288,13 @@
 
 .live-metrics-directory__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 0.85rem;
 }
 
 .live-metrics-person-card {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 0.75rem;
   align-items: center;
   color: var(--primary);
@@ -335,7 +335,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--tertiary);
+  color: var(--primary);
   text-decoration: none;
 
   &:hover {
@@ -343,27 +343,49 @@
   }
 }
 
-.live-metrics-person-card__details {
+.live-metrics-person-card__traits {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem 0.6rem;
-  margin: 0.35rem 0 0;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.live-metrics-trait {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  max-width: 100%;
+  border: 1px solid var(--primary-low);
+  border-radius: 999px;
+  padding: 0.16rem 0.5rem;
+  background: var(--secondary);
   color: var(--primary-medium);
-  font-size: var(--font-down-1);
+  font-size: var(--font-down-2);
+  font-weight: 700;
+  line-height: 1.25;
+}
 
-  div {
-    display: inline-flex;
-    gap: 0.2rem;
-    min-width: 0;
-  }
+.live-metrics-trait__icon {
+  font-size: 1.05em;
+  line-height: 1;
+}
 
-  dt {
-    font-weight: 700;
-  }
+.live-metrics-trait--age::before {
+  content: "Age";
+  color: var(--primary-medium);
+  font-weight: 700;
+}
 
-  dd {
-    margin: 0;
-  }
+.live-metrics-trait--gender-male .live-metrics-trait__icon {
+  color: #2271d1;
+}
+
+.live-metrics-trait--gender-female .live-metrics-trait__icon {
+  color: #d63384;
+}
+
+.live-metrics-trait--gender-non-binary .live-metrics-trait__icon {
+  color: #8a63d2;
 }
 
 .live-metrics-person-card__provider,
@@ -374,12 +396,18 @@
 }
 
 .live-metrics-person-card__reading {
-  grid-column: 1 / -1;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--primary-low);
+  grid-column: 3;
+  grid-row: 1;
+  align-self: center;
+  justify-self: end;
+  text-align: right;
+  min-width: 5.5rem;
 
   strong {
+    display: block;
     font-size: var(--font-up-2);
+    line-height: 1.05;
+    color: var(--primary);
   }
 }
 
@@ -558,5 +586,19 @@
 
   .live-metrics-grid--settings-open {
     grid-template-columns: 1fr;
+  }
+
+  .live-metrics-person-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .live-metrics-person-card__reading {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    justify-self: stretch;
+    text-align: left;
+    min-width: 0;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--primary-low);
   }
 }

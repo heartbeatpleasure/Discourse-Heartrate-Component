@@ -21,6 +21,54 @@ function visibilityLabel(id) {
   return option?.label || String(id || "").replace(/_/g, " ");
 }
 
+
+function normalizeGenderDetail(value) {
+  const rawValue = String(value || "").trim();
+  const normalized = rawValue.toLowerCase().replace(/[\s_-]+/g, "-");
+
+  if (["male", "man", "m"].includes(normalized)) {
+    return { value: rawValue || "Male", icon: "♂", className: "live-metrics-trait--gender-male" };
+  }
+
+  if (["female", "woman", "vrouw", "f"].includes(normalized)) {
+    return { value: rawValue || "Female", icon: "♀", className: "live-metrics-trait--gender-female" };
+  }
+
+  if (["non-binary", "nonbinary", "non-binair", "nb"].includes(normalized)) {
+    return { value: rawValue || "Non-binary", icon: "⚧", className: "live-metrics-trait--gender-non-binary" };
+  }
+
+  return { value: rawValue, icon: null, className: "live-metrics-trait--gender-other" };
+}
+
+function decorateProfileDetails(details) {
+  if (!Array.isArray(details)) {
+    return [];
+  }
+
+  return details
+    .map((detail) => {
+      const key = String(detail?.key || "").toLowerCase();
+      const value = String(detail?.value || "").trim();
+
+      if (!value) {
+        return null;
+      }
+
+      if (key === "age") {
+        return { key, value, label: "Age", icon: null, className: "live-metrics-trait--age" };
+      }
+
+      if (key === "gender") {
+        const gender = normalizeGenderDetail(value);
+        return { key, label: "Gender", ...gender };
+      }
+
+      return null;
+    })
+    .filter(Boolean);
+}
+
 function decorateSettingsAccount(account) {
   if (!account) {
     return null;
@@ -54,7 +102,7 @@ function decorateAccount(account, nowMs = Date.now()) {
     ? {
         ...account.user,
         avatar_url: String(account.user.avatar_template || "").replace("{size}", "64"),
-        profile_details: Array.isArray(account.user.profile_details) ? account.user.profile_details : [],
+        profile_details: decorateProfileDetails(account.user.profile_details),
       }
     : null;
 
@@ -667,14 +715,16 @@ export default class LiveMetricsPage extends Component {
                       </a>
                       <span class="live-metrics-person-card__provider">{{row.provider_label}}</span>
                       {{#if row.user.profile_details.length}}
-                        <dl class="live-metrics-person-card__details">
+                        <div class="live-metrics-person-card__traits" aria-label="Public profile details">
                           {{#each row.user.profile_details key="key" as |detail|}}
-                            <div>
-                              <dt>{{detail.label}}</dt>
-                              <dd>{{detail.value}}</dd>
-                            </div>
+                            <span class="live-metrics-trait {{detail.className}}" title={{detail.label}}>
+                              {{#if detail.icon}}
+                                <span class="live-metrics-trait__icon" aria-hidden="true">{{detail.icon}}</span>
+                              {{/if}}
+                              <span class="live-metrics-trait__value">{{detail.value}}</span>
+                            </span>
                           {{/each}}
-                        </dl>
+                        </div>
                       {{/if}}
                     </div>
                     <div class="live-metrics-person-card__reading {{row.status_class}}">
