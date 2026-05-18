@@ -1,6 +1,7 @@
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
+import { service } from "@ember/service";
 import { on } from "@ember/modifier";
 import { fn } from "@ember/helper";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
@@ -53,6 +54,7 @@ function decorateAccount(account, nowMs = Date.now()) {
     ? {
         ...account.user,
         avatar_url: String(account.user.avatar_template || "").replace("{size}", "64"),
+        profile_details: Array.isArray(account.user.profile_details) ? account.user.profile_details : [],
       }
     : null;
 
@@ -125,13 +127,14 @@ function formatAge(seconds) {
 }
 
 export default class LiveMetricsPage extends Component {
+  @service appEvents;
   @tracked config = null;
   @tracked me = null;
   @tracked liveAccount = null;
   @tracked directoryRows = [];
   @tracked loading = true;
   @tracked refreshing = false;
-  @tracked saving = false;
+  @tracked savingProvider = null;
   @tracked disconnectingProvider = null;
   @tracked connectingHyperate = false;
   @tracked activatingProvider = null;
@@ -172,7 +175,9 @@ export default class LiveMetricsPage extends Component {
   }
 
   get directory() {
-    return (this.directoryRows || []).map((row) => decorateAccount(row, this.nowMs));
+    return (this.directoryRows || [])
+      .map((row) => decorateAccount(row, this.nowMs))
+      .filter((row) => row?.live?.status === "live" && row?.live?.heart_rate);
   }
 
   get providerRows() {
@@ -186,6 +191,7 @@ export default class LiveMetricsPage extends Component {
       const connecting = isHyperate ? this.connectingHyperate : false;
       const disconnecting = this.disconnectingProvider === provider;
       const activating = this.activatingProvider === provider;
+      const saving = this.savingProvider === provider;
 
       return {
         provider,
@@ -197,11 +203,12 @@ export default class LiveMetricsPage extends Component {
         isPulsoid,
         isHyperate,
         connect_url: config.connect_url,
-        connect_disabled: !config.configured || connecting || this.databaseNotReady,
+        connect_disabled: !config.configured || connecting || this.databaseNotReady || !this.canShare,
         disconnecting,
         connecting,
         activating,
-        activate_disabled: this.saving || activating || !this.canShare,
+        provider_saving: saving,
+        activate_disabled: activating || !this.canShare,
         visibility_show_private: this.showVisibilityOption(account, "private"),
         visibility_show_logged_in: this.showVisibilityOption(account, "logged_in"),
         visibility_show_public: this.showVisibilityOption(account, "public"),
@@ -464,7 +471,7 @@ export default class LiveMetricsPage extends Component {
       });
       this.hyperateDeviceId = "";
       this.notice = "HypeRate connected and selected as your active provider.";
-      await this.refreshLiveSections();
+      this.refreshLiveSections();
     } catch (error) {
       this.error = error?.jqXHR?.responseJSON?.message || "HypeRate could not be connected. Check the device ID and try again.";
     } finally {
@@ -517,7 +524,7 @@ export default class LiveMetricsPage extends Component {
       const label = provider === "hyperate" ? "HypeRate" : "Pulsoid";
       this.notice = `${label} is now your active provider.`;
       this.liveAccount = null;
-      await this.refreshLiveSections();
+      this.refreshLiveSections();
     } catch (error) {
       this.error = error?.jqXHR?.responseJSON?.message || "Your active provider could not be changed.";
       await this.loadSettings();
@@ -543,11 +550,11 @@ export default class LiveMetricsPage extends Component {
       return;
     }
 
-    if (!account?.connected || this.saving) {
+    if (!account?.connected || this.savingProvider === provider) {
       return;
     }
 
-    this.saving = true;
+    this.savingProvider = provider;
     this.error = null;
 
     try {
@@ -555,13 +562,37 @@ export default class LiveMetricsPage extends Component {
         type: "PUT",
         data: changes,
       });
-      await this.refreshLiveSections();
+      this.refreshLiveSections();
     } catch (error) {
       this.error = error?.jqXHR?.responseJSON?.message || "Your heartrate settings could not be saved.";
       await this.loadSettings();
     } finally {
-      this.saving = false;
+      this.savingProvider = null;
     }
+  }
+
+  @action
+  handleDirectoryUserClick(row, event) {
+    if (!row?.user?.username || !event) {
+      return;
+    }
+
+    if (event.button && event.button !== 0) {
+      return;
+    }
+
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+
+    const target = event.currentTarget || event.target?.closest?.("[data-user-card]");
+    if (!target || !this.appEvents?.trigger) {
+      return;
+    }
+
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    this.appEvents.trigger("topic-header:trigger-user-card", row.user.username, target, event);
   }
 
   <template>
@@ -615,17 +646,42 @@ export default class LiveMetricsPage extends Component {
             {{#if this.directory.length}}
               <div class="live-metrics-directory__grid">
                 {{#each this.directory key="row_key" as |row|}}
-                  <a class="live-metrics-person-card" href={{row.user.profile_url}}>
-                    <img class="live-metrics-avatar" src={{row.user.avatar_url}} alt="" />
+                  <article class="live-metrics-person-card">
+                    <a
+                      class="live-metrics-avatar-link trigger-user-card"
+                      href={{row.user.profile_url}}
+                      data-user-card={{row.user.username}}
+                      title={{row.user.username}}
+                      {{on "click" (fn this.handleDirectoryUserClick row)}}
+                    >
+                      <img class="live-metrics-avatar" src={{row.user.avatar_url}} alt="" />
+                    </a>
                     <div class="live-metrics-person-card__main">
-                      <span class="live-metrics-person-card__name">{{row.user.username}}</span>
+                      <a
+                        class="live-metrics-person-card__name trigger-user-card"
+                        href={{row.user.profile_url}}
+                        data-user-card={{row.user.username}}
+                        {{on "click" (fn this.handleDirectoryUserClick row)}}
+                      >
+                        {{row.user.username}}
+                      </a>
                       <span class="live-metrics-person-card__provider">{{row.provider_label}}</span>
+                      {{#if row.user.profile_details.length}}
+                        <dl class="live-metrics-person-card__details">
+                          {{#each row.user.profile_details key="key" as |detail|}}
+                            <div>
+                              <dt>{{detail.label}}</dt>
+                              <dd>{{detail.value}}</dd>
+                            </div>
+                          {{/each}}
+                        </dl>
+                      {{/if}}
                     </div>
                     <div class="live-metrics-person-card__reading {{row.status_class}}">
                       <strong>{{row.bpm_label}}</strong>
                       <span>{{row.freshness_label}}</span>
                     </div>
-                  </a>
+                  </article>
                 {{/each}}
               </div>
             {{else}}
@@ -738,13 +794,13 @@ export default class LiveMetricsPage extends Component {
 
                               {{#if provider.active}}
                                 <label class="live-metrics-toggle">
-                                  <input type="checkbox" checked={{provider.account.show_in_directory}} disabled={{this.saving}} {{on "change" (fn this.toggleDirectory provider.provider)}} />
+                                  <input type="checkbox" checked={{provider.account.show_in_directory}} disabled={{provider.provider_saving}} {{on "change" (fn this.toggleDirectory provider.provider)}} />
                                   <span>Show on the Heartrate overview</span>
                                 </label>
 
                                 <label class="live-metrics-field">
                                   <span>Who can see my heart-rate data</span>
-                                  <select disabled={{this.saving}} {{on "change" (fn this.changeVisibility provider.provider)}}>
+                                  <select disabled={{provider.provider_saving}} {{on "change" (fn this.changeVisibility provider.provider)}}>
                                     {{#if provider.visibility_show_private}}
                                       <option value="private" selected={{provider.account.visibility_private}} disabled={{provider.visibility_private_disabled}}>{{provider.visibility_private_label}}</option>
                                     {{/if}}
