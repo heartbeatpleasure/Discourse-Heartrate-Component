@@ -202,7 +202,18 @@ export default class LiveMetricsPage extends Component {
         connecting,
         activating,
         activate_disabled: this.saving || activating || !this.canShare,
-        visibility_options: this.visibilityOptionsFor(account),
+        visibility_show_private: this.showVisibilityOption(account, "private"),
+        visibility_show_logged_in: this.showVisibilityOption(account, "logged_in"),
+        visibility_show_public: this.showVisibilityOption(account, "public"),
+        visibility_show_staff: this.showVisibilityOption(account, "staff"),
+        visibility_private_disabled: this.visibilityOptionDisabled(account, "private"),
+        visibility_logged_in_disabled: this.visibilityOptionDisabled(account, "logged_in"),
+        visibility_public_disabled: this.visibilityOptionDisabled(account, "public"),
+        visibility_staff_disabled: this.visibilityOptionDisabled(account, "staff"),
+        visibility_private_label: this.visibilityOptionLabel(account, "private"),
+        visibility_logged_in_label: this.visibilityOptionLabel(account, "logged_in"),
+        visibility_public_label: this.visibilityOptionLabel(account, "public"),
+        visibility_staff_label: this.visibilityOptionLabel(account, "staff"),
       };
     });
   }
@@ -232,13 +243,21 @@ export default class LiveMetricsPage extends Component {
     return this.config?.permissions?.can_share !== false;
   }
 
-  get visibilityOptions() {
-    const options = this.config?.visibility_options || DEFAULT_VISIBILITY_OPTIONS;
-    const normalized = options
-      .map((option) => ({ id: option.id, label: option.label || visibilityLabel(option.id) }))
-      .filter((option) => option.id);
+  get visibilityOptionIds() {
+    const options = Array.isArray(this.config?.visibility_options) ? this.config.visibility_options : DEFAULT_VISIBILITY_OPTIONS;
+    const ids = options
+      .map((option) => (typeof option === "string" ? option : option?.id))
+      .map((id) => String(id || "").trim())
+      .filter(Boolean);
 
-    return normalized.length ? normalized : DEFAULT_VISIBILITY_OPTIONS;
+    return ids.length ? ids : DEFAULT_VISIBILITY_OPTIONS.map((option) => option.id);
+  }
+
+  get visibilityOptions() {
+    return this.visibilityOptionIds.map((id) => ({
+      id,
+      label: visibilityLabel(id),
+    }));
   }
 
   get settingsToggleLabel() {
@@ -250,26 +269,19 @@ export default class LiveMetricsPage extends Component {
     return Math.max(1, Math.min(seconds, 60)) * 1000;
   }
 
-  visibilityOptionsFor(account) {
+  showVisibilityOption(account, id) {
     const current = account?.visibility || "private";
-    const options = this.visibilityOptions.map((option) => ({
-      ...option,
-      key: option.id,
-      selected: option.id === current,
-      disabled: false,
-    }));
+    return this.visibilityOptionIds.includes(id) || current === id;
+  }
 
-    if (current && !options.some((option) => option.id === current)) {
-      options.unshift({
-        id: current,
-        key: `current-${current}`,
-        label: `${visibilityLabel(current)} (disabled by site settings)`,
-        selected: true,
-        disabled: true,
-      });
-    }
+  visibilityOptionDisabled(account, id) {
+    const current = account?.visibility || "private";
+    return current === id && !this.visibilityOptionIds.includes(id);
+  }
 
-    return options;
+  visibilityOptionLabel(account, id) {
+    const label = visibilityLabel(id);
+    return this.visibilityOptionDisabled(account, id) ? `${label} (disabled by site settings)` : label;
   }
 
   @action
@@ -626,12 +638,12 @@ export default class LiveMetricsPage extends Component {
         {{/if}}
 
         <section class="live-metrics-card live-metrics-manage-card">
-          <div class="live-metrics-card__header live-metrics-card__header--centered">
-            <div>
+          <div class="live-metrics-manage-card__header">
+            <div class="live-metrics-manage-card__title">
               <h2>Manage my heartrate sharing</h2>
               <p>Connect providers, choose your active source, and decide whether your live heart rate appears in the overview.</p>
             </div>
-            <button type="button" class="btn btn-default" {{on "click" this.toggleSettings}}>
+            <button type="button" class="btn btn-default live-metrics-manage-toggle" {{on "click" this.toggleSettings}}>
               {{this.settingsToggleLabel}}
             </button>
           </div>
@@ -733,9 +745,18 @@ export default class LiveMetricsPage extends Component {
                                 <label class="live-metrics-field">
                                   <span>Who can see my heart-rate data</span>
                                   <select disabled={{this.saving}} {{on "change" (fn this.changeVisibility provider.provider)}}>
-                                    {{#each provider.visibility_options key="key" as |option|}}
-                                      <option value={{option.id}} selected={{option.selected}} disabled={{option.disabled}}>{{option.label}}</option>
-                                    {{/each}}
+                                    {{#if provider.visibility_show_private}}
+                                      <option value="private" selected={{provider.account.visibility_private}} disabled={{provider.visibility_private_disabled}}>{{provider.visibility_private_label}}</option>
+                                    {{/if}}
+                                    {{#if provider.visibility_show_logged_in}}
+                                      <option value="logged_in" selected={{provider.account.visibility_logged_in}} disabled={{provider.visibility_logged_in_disabled}}>{{provider.visibility_logged_in_label}}</option>
+                                    {{/if}}
+                                    {{#if provider.visibility_show_public}}
+                                      <option value="public" selected={{provider.account.visibility_public}} disabled={{provider.visibility_public_disabled}}>{{provider.visibility_public_label}}</option>
+                                    {{/if}}
+                                    {{#if provider.visibility_show_staff}}
+                                      <option value="staff" selected={{provider.account.visibility_staff}} disabled={{provider.visibility_staff_disabled}}>{{provider.visibility_staff_label}}</option>
+                                    {{/if}}
                                   </select>
                                   <small class="live-metrics-field__help">Only the visibility choices enabled by staff are shown here.</small>
                                 </label>
