@@ -464,3 +464,35 @@
   margin: 0;
   font-size: var(--font-down-1);
 }
+
+.live-metrics-card__header--centered {
+  align-items: center;
+
+  .btn {
+    flex: 0 0 auto;
+  }
+}
+
+.live-metrics-manage-card {
+  margin-top: 1rem;
+}
+
+.live-metrics-grid--settings-open {
+  margin-top: 1rem;
+  margin-bottom: 0;
+}
+
+.live-metrics-card--nested {
+  box-shadow: none;
+  background: var(--primary-very-low);
+}
+
+@media screen and (max-width: 760px) {
+  .live-metrics-card__header--centered {
+    align-items: stretch;
+
+    .btn {
+      width: 100%;
+    }
+  }
+}

@@ -8,6 +8,17 @@ import { ajax } from "discourse/lib/ajax";
 import I18n from "I18n";
 
 const PROVIDER_ORDER = ["pulsoid", "hyperate"];
+const DEFAULT_VISIBILITY_OPTIONS = [
+  { id: "private", label: "Only me" },
+  { id: "logged_in", label: "Logged-in users" },
+  { id: "public", label: "Public" },
+  { id: "staff", label: "Staff only" },
+];
+
+function visibilityLabel(id) {
+  const option = DEFAULT_VISIBILITY_OPTIONS.find((item) => item.id === id);
+  return option?.label || String(id || "").replace(/_/g, " ");
+}
 
 function decorateSettingsAccount(account) {
   if (!account) {
@@ -128,6 +139,7 @@ export default class LiveMetricsPage extends Component {
   @tracked notice = null;
   @tracked nowMs = Date.now();
   @tracked hyperateDeviceId = "";
+  @tracked settingsOpen = false;
 
   pollTimer = null;
   clockTimer = null;
@@ -189,7 +201,8 @@ export default class LiveMetricsPage extends Component {
         disconnecting,
         connecting,
         activating,
-        activate_disabled: this.saving || activating,
+        activate_disabled: this.saving || activating || !this.canShare,
+        visibility_options: this.visibilityOptionsFor(account),
       };
     });
   }
@@ -204,7 +217,7 @@ export default class LiveMetricsPage extends Component {
 
   get hyperateConnectDisabled() {
     const provider = this.config?.providers?.hyperate;
-    return provider?.configured !== true || this.connectingHyperate || this.databaseNotReady || this.hyperateDeviceId.trim().length === 0;
+    return provider?.configured !== true || !this.canShare || this.connectingHyperate || this.databaseNotReady || this.hyperateDeviceId.trim().length === 0;
   }
 
   get directoryEnabled() {
@@ -215,9 +228,48 @@ export default class LiveMetricsPage extends Component {
     return this.config?.database_ready === false;
   }
 
+  get canShare() {
+    return this.config?.permissions?.can_share !== false;
+  }
+
+  get visibilityOptions() {
+    const options = this.config?.visibility_options || DEFAULT_VISIBILITY_OPTIONS;
+    const normalized = options
+      .map((option) => ({ id: option.id, label: option.label || visibilityLabel(option.id) }))
+      .filter((option) => option.id);
+
+    return normalized.length ? normalized : DEFAULT_VISIBILITY_OPTIONS;
+  }
+
+  get settingsToggleLabel() {
+    return this.settingsOpen ? "Hide connection settings" : "Manage my connections";
+  }
+
   get pollIntervalMs() {
     const seconds = Number(this.config?.poll_interval_seconds || 3);
     return Math.max(1, Math.min(seconds, 60)) * 1000;
+  }
+
+  visibilityOptionsFor(account) {
+    const current = account?.visibility || "private";
+    const options = this.visibilityOptions.map((option) => ({
+      ...option,
+      key: option.id,
+      selected: option.id === current,
+      disabled: false,
+    }));
+
+    if (current && !options.some((option) => option.id === current)) {
+      options.unshift({
+        id: current,
+        key: `current-${current}`,
+        label: `${visibilityLabel(current)} (disabled by site settings)`,
+        selected: true,
+        disabled: true,
+      });
+    }
+
+    return options;
   }
 
   @action
@@ -261,6 +313,8 @@ export default class LiveMetricsPage extends Component {
         return "Pulsoid did not return an authorization code. Please try again.";
       case "pulsoid_connect_failed":
         return "Pulsoid could not be connected. Please try again or contact staff.";
+      case "sharing_not_allowed":
+        return "Your account is not allowed to connect or share heartrate data.";
       default:
         return "The heartrate action could not be completed.";
     }
@@ -354,7 +408,17 @@ export default class LiveMetricsPage extends Component {
   }
 
   @action
+  toggleSettings() {
+    this.settingsOpen = !this.settingsOpen;
+  }
+
+  @action
   connectPulsoid() {
+    if (!this.canShare) {
+      this.error = "Your account is not allowed to connect or share heartrate data.";
+      return;
+    }
+
     const url = this.config?.providers?.pulsoid?.connect_url || "/live-metrics/api/connect/pulsoid";
     window.location.href = url;
   }
@@ -369,6 +433,11 @@ export default class LiveMetricsPage extends Component {
     event?.preventDefault?.();
 
     const deviceId = this.hyperateDeviceId.trim();
+    if (!this.canShare) {
+      this.error = "Your account is not allowed to connect or share heartrate data.";
+      return;
+    }
+
     if (!deviceId || this.connectingHyperate) {
       return;
     }
@@ -417,6 +486,11 @@ export default class LiveMetricsPage extends Component {
 
   @action
   async activateProvider(provider) {
+    if (!this.canShare) {
+      this.error = "Your account is not allowed to connect or share heartrate data.";
+      return;
+    }
+
     if (this.activatingProvider || this.activeSettingsAccount?.provider === provider) {
       return;
     }
@@ -452,6 +526,11 @@ export default class LiveMetricsPage extends Component {
 
   async saveSettings(provider, changes) {
     const account = this.settingsAccounts.find((item) => item.provider === provider);
+    if (!this.canShare) {
+      this.error = "Your account is not allowed to connect or share heartrate data.";
+      return;
+    }
+
     if (!account?.connected || this.saving) {
       return;
     }
@@ -512,134 +591,6 @@ export default class LiveMetricsPage extends Component {
       {{#if this.loading}}
         <div class="live-metrics-card live-metrics-muted">Loading heartrate settings…</div>
       {{else}}
-        <section class="live-metrics-grid">
-          <article class="live-metrics-card live-metrics-card--settings">
-            <div class="live-metrics-card__header">
-              <div>
-                <h2>My connections</h2>
-                <p>Connect one or more providers, then choose which one is currently active.</p>
-              </div>
-            </div>
-
-            {{#if this.databaseNotReady}}
-              <div class="live-metrics-inline-warning">
-                Heartrate database table is not ready yet. Please run Discourse migrations and restart/rebuild.
-              </div>
-            {{/if}}
-
-            {{#if this.hasEnabledProviders}}
-              <div class="live-metrics-provider-list">
-                {{#each this.providerRows key="provider" as |provider|}}
-                  <section class="live-metrics-provider-card {{if provider.active "live-metrics-provider-card--active"}}">
-                    <div class="live-metrics-provider-row">
-                      <div>
-                        <strong>{{provider.label}}</strong>
-                        {{#if provider.connected}}
-                          <p>{{if provider.active "Connected · active" "Connected"}}</p>
-                          {{#if provider.account.live_error}}
-                            <small class="live-metrics-provider-error">{{provider.account.live_error}}</small>
-                          {{/if}}
-                        {{else}}
-                          {{#if provider.configured}}
-                            <p>Available</p>
-                          {{else}}
-                            <p>Not configured yet</p>
-                          {{/if}}
-                        {{/if}}
-                      </div>
-
-                      {{#if provider.connected}}
-                        <button type="button" class="btn btn-danger" disabled={{provider.disconnecting}} {{on "click" (fn this.disconnectProvider provider.provider)}}>
-                          {{#if provider.disconnecting}}Disconnecting…{{else}}Disconnect{{/if}}
-                        </button>
-                      {{else}}
-                        {{#if provider.isPulsoid}}
-                          <button type="button" class="btn btn-primary" disabled={{provider.connect_disabled}} {{on "click" this.connectPulsoid}}>
-                            Connect your Pulsoid account
-                          </button>
-                        {{/if}}
-                      {{/if}}
-                    </div>
-
-                    {{#unless provider.configured}}
-                      <div class="live-metrics-inline-warning live-metrics-inline-warning--compact">
-                        {{provider.label}} is enabled, but the required server-side settings are not configured yet.
-                      </div>
-                    {{/unless}}
-
-                    {{#if provider.isHyperate}}
-                      {{#unless provider.connected}}
-                        <form class="live-metrics-connect-form" {{on "submit" this.connectHyperate}}>
-                          <label class="live-metrics-field">
-                            <span>HypeRate device ID</span>
-                            <input type="text" value={{this.hyperateDeviceId}} disabled={{provider.connect_disabled}} {{on "input" this.updateHyperateDeviceId}} placeholder="Enter your HypeRate device ID" />
-                            <small class="live-metrics-field__help">Use the device/user ID provided by HypeRate. The site API key stays server-side.</small>
-                          </label>
-                          <button type="submit" class="btn btn-primary" disabled={{this.hyperateConnectDisabled}}>
-                            {{#if provider.connecting}}Connecting…{{else}}Connect HypeRate{{/if}}
-                          </button>
-                        </form>
-                      {{/unless}}
-                    {{/if}}
-
-                    {{#if provider.account}}
-                      <div class="live-metrics-settings-list">
-                        <label class="live-metrics-toggle live-metrics-toggle--active-provider">
-                          <input type="radio" name="active-heartrate-provider" checked={{provider.active}} disabled={{provider.activate_disabled}} {{on "change" (fn this.activateProvider provider.provider)}} />
-                          <span>
-                            <strong>Use as active provider</strong>
-                            <small>Only the active provider is used for your live preview and community overview.</small>
-                          </span>
-                        </label>
-
-                        {{#if provider.active}}
-                          <label class="live-metrics-toggle">
-                            <input type="checkbox" checked={{provider.account.show_in_directory}} disabled={{this.saving}} {{on "change" (fn this.toggleDirectory provider.provider)}} />
-                            <span>Show on the Heartrate overview</span>
-                          </label>
-
-                          <label class="live-metrics-field">
-                            <span>Who can see my heart-rate data</span>
-                            <select disabled={{this.saving}} {{on "change" (fn this.changeVisibility provider.provider)}}>
-                              <option value="private" selected={{provider.account.visibility_private}}>Only me</option>
-                              <option value="logged_in" selected={{provider.account.visibility_logged_in}}>Logged-in users</option>
-                              <option value="public" selected={{provider.account.visibility_public}}>Public</option>
-                              <option value="staff" selected={{provider.account.visibility_staff}}>Staff only</option>
-                            </select>
-                            <small class="live-metrics-field__help">This applies to the Heartrate overview for your active provider.</small>
-                          </label>
-                        {{else}}
-                          <p class="live-metrics-muted live-metrics-muted--small">Sharing settings are available after making this provider active.</p>
-                        {{/if}}
-                      </div>
-                    {{/if}}
-                  </section>
-                {{/each}}
-              </div>
-            {{else}}
-              <div class="live-metrics-empty-state">
-                <h3>No providers enabled yet</h3>
-                <p>An administrator can enable Pulsoid, HypeRate, or both in the Heartrate plugin settings.</p>
-              </div>
-            {{/if}}
-          </article>
-
-          <article class="live-metrics-card live-metrics-card--info">
-            <div class="live-metrics-card__header">
-              <div>
-                <h2>How sharing works</h2>
-                <p>The live card at the top is your personal preview. These settings decide whether that same live status may be shown to others.</p>
-              </div>
-            </div>
-
-            <ul class="live-metrics-info-list">
-              <li>You can connect multiple providers, but only one can be active at a time.</li>
-              <li>The overview is opt-in and only uses your active provider.</li>
-              <li>Historical heart-rate data is not published here.</li>
-            </ul>
-          </article>
-        </section>
-
         {{#if this.directoryEnabled}}
           <section class="live-metrics-card live-metrics-directory">
             <div class="live-metrics-card__header">
@@ -673,6 +624,156 @@ export default class LiveMetricsPage extends Component {
             {{/if}}
           </section>
         {{/if}}
+
+        <section class="live-metrics-card live-metrics-manage-card">
+          <div class="live-metrics-card__header live-metrics-card__header--centered">
+            <div>
+              <h2>Manage my heartrate sharing</h2>
+              <p>Connect providers, choose your active source, and decide whether your live heart rate appears in the overview.</p>
+            </div>
+            <button type="button" class="btn btn-default" {{on "click" this.toggleSettings}}>
+              {{this.settingsToggleLabel}}
+            </button>
+          </div>
+
+          {{#unless this.canShare}}
+            <div class="live-metrics-inline-warning live-metrics-inline-warning--compact">
+              Your account can view shared heartrate data, but it is not allowed to connect providers or share your own heartrate data.
+            </div>
+          {{/unless}}
+
+          {{#if this.settingsOpen}}
+            <div class="live-metrics-grid live-metrics-grid--settings-open">
+              <article class="live-metrics-card live-metrics-card--settings live-metrics-card--nested">
+                <div class="live-metrics-card__header">
+                  <div>
+                    <h3>My connections</h3>
+                    <p>Connect one or more providers, then choose which one is currently active.</p>
+                  </div>
+                </div>
+
+                {{#if this.databaseNotReady}}
+                  <div class="live-metrics-inline-warning">
+                    Heartrate database table is not ready yet. Please run Discourse migrations and restart/rebuild.
+                  </div>
+                {{/if}}
+
+                {{#if this.canShare}}
+                  {{#if this.hasEnabledProviders}}
+                    <div class="live-metrics-provider-list">
+                      {{#each this.providerRows key="provider" as |provider|}}
+                        <section class="live-metrics-provider-card {{if provider.active "live-metrics-provider-card--active"}}">
+                          <div class="live-metrics-provider-row">
+                            <div>
+                              <strong>{{provider.label}}</strong>
+                              {{#if provider.connected}}
+                                <p>{{if provider.active "Connected · active" "Connected"}}</p>
+                                {{#if provider.account.live_error}}
+                                  <small class="live-metrics-provider-error">{{provider.account.live_error}}</small>
+                                {{/if}}
+                              {{else}}
+                                {{#if provider.configured}}
+                                  <p>Available</p>
+                                {{else}}
+                                  <p>Not configured yet</p>
+                                {{/if}}
+                              {{/if}}
+                            </div>
+
+                            {{#if provider.connected}}
+                              <button type="button" class="btn btn-danger" disabled={{provider.disconnecting}} {{on "click" (fn this.disconnectProvider provider.provider)}}>
+                                {{#if provider.disconnecting}}Disconnecting…{{else}}Disconnect{{/if}}
+                              </button>
+                            {{else}}
+                              {{#if provider.isPulsoid}}
+                                <button type="button" class="btn btn-primary" disabled={{provider.connect_disabled}} {{on "click" this.connectPulsoid}}>
+                                  Connect your Pulsoid account
+                                </button>
+                              {{/if}}
+                            {{/if}}
+                          </div>
+
+                          {{#unless provider.configured}}
+                            <div class="live-metrics-inline-warning live-metrics-inline-warning--compact">
+                              {{provider.label}} is enabled, but the required server-side settings are not configured yet.
+                            </div>
+                          {{/unless}}
+
+                          {{#if provider.isHyperate}}
+                            {{#unless provider.connected}}
+                              <form class="live-metrics-connect-form" {{on "submit" this.connectHyperate}}>
+                                <label class="live-metrics-field">
+                                  <span>HypeRate device ID</span>
+                                  <input type="text" value={{this.hyperateDeviceId}} disabled={{provider.connect_disabled}} {{on "input" this.updateHyperateDeviceId}} placeholder="Enter your HypeRate device ID" />
+                                  <small class="live-metrics-field__help">Use the device/user ID provided by HypeRate. The site API key stays server-side.</small>
+                                </label>
+                                <button type="submit" class="btn btn-primary" disabled={{this.hyperateConnectDisabled}}>
+                                  {{#if provider.connecting}}Connecting…{{else}}Connect HypeRate{{/if}}
+                                </button>
+                              </form>
+                            {{/unless}}
+                          {{/if}}
+
+                          {{#if provider.account}}
+                            <div class="live-metrics-settings-list">
+                              <label class="live-metrics-toggle live-metrics-toggle--active-provider">
+                                <input type="radio" name="active-heartrate-provider" checked={{provider.active}} disabled={{provider.activate_disabled}} {{on "change" (fn this.activateProvider provider.provider)}} />
+                                <span>
+                                  <strong>Use as active provider</strong>
+                                  <small>Only the active provider is used for your live preview and community overview.</small>
+                                </span>
+                              </label>
+
+                              {{#if provider.active}}
+                                <label class="live-metrics-toggle">
+                                  <input type="checkbox" checked={{provider.account.show_in_directory}} disabled={{this.saving}} {{on "change" (fn this.toggleDirectory provider.provider)}} />
+                                  <span>Show on the Heartrate overview</span>
+                                </label>
+
+                                <label class="live-metrics-field">
+                                  <span>Who can see my heart-rate data</span>
+                                  <select disabled={{this.saving}} {{on "change" (fn this.changeVisibility provider.provider)}}>
+                                    {{#each provider.visibility_options key="key" as |option|}}
+                                      <option value={{option.id}} selected={{option.selected}} disabled={{option.disabled}}>{{option.label}}</option>
+                                    {{/each}}
+                                  </select>
+                                  <small class="live-metrics-field__help">Only the visibility choices enabled by staff are shown here.</small>
+                                </label>
+                              {{else}}
+                                <p class="live-metrics-muted live-metrics-muted--small">Sharing settings are available after making this provider active.</p>
+                              {{/if}}
+                            </div>
+                          {{/if}}
+                        </section>
+                      {{/each}}
+                    </div>
+                  {{else}}
+                    <div class="live-metrics-empty-state">
+                      <h3>No providers enabled yet</h3>
+                      <p>An administrator can enable Pulsoid, HypeRate, or both in the Heartrate plugin settings.</p>
+                    </div>
+                  {{/if}}
+                {{/if}}
+              </article>
+
+              <article class="live-metrics-card live-metrics-card--info live-metrics-card--nested">
+                <div class="live-metrics-card__header">
+                  <div>
+                    <h3>How sharing works</h3>
+                    <p>The live card at the top is your personal preview. These settings decide whether that same live status may be shown to others.</p>
+                  </div>
+                </div>
+
+                <ul class="live-metrics-info-list">
+                  <li>You can connect multiple providers, but only one can be active at a time.</li>
+                  <li>The overview is opt-in and only uses your active provider.</li>
+                  <li>Staff can limit who may view the page, who may share, and which visibility choices are available.</li>
+                  <li>Historical heart-rate data is not published here.</li>
+                </ul>
+              </article>
+            </div>
+          {{/if}}
+        </section>
       {{/if}}
     </div>
   </template>
