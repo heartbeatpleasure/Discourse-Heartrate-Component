@@ -647,10 +647,9 @@ export default class LiveMetricsPage extends Component {
     <div class="live-metrics-page" {{didInsert this.setup}}>
       <section class="live-metrics-hero">
         <div class="live-metrics-hero__copy">
-          <p class="live-metrics-eyebrow">Connected apps</p>
           <h1>{{this.title}}</h1>
           <p>
-            Connect heart-rate providers and share live readings in a consistent community layout. Choose one active provider, control who can see it, and keep your history private.
+            Connect Pulsoid or HypeRate to share your live heart-rate reading with other members. Your current reading is only shown while your active provider has a recent signal, and your heart-rate history is not stored.
           </p>
         </div>
 
@@ -687,7 +686,7 @@ export default class LiveMetricsPage extends Component {
             <div class="live-metrics-card__header">
               <div>
                 <h2>Community overview</h2>
-                <p>Users who explicitly opted in to the overview. Live users are shown first.</p>
+                <p>Members who enabled sharing and currently have a live signal appear here.</p>
               </div>
             </div>
 
@@ -714,30 +713,30 @@ export default class LiveMetricsPage extends Component {
                         {{row.user.username}}
                       </a>
                       <span class="live-metrics-person-card__provider">{{row.provider_label}}</span>
-                      {{#if row.user.profile_details.length}}
-                        <div class="live-metrics-person-card__traits" aria-label="Public profile details">
-                          {{#each row.user.profile_details key="key" as |detail|}}
-                            <span class="live-metrics-trait {{detail.className}}" title={{detail.label}}>
-                              {{#if detail.icon}}
-                                <span class="live-metrics-trait__icon" aria-hidden="true">{{detail.icon}}</span>
-                              {{/if}}
-                              <span class="live-metrics-trait__value">{{detail.value}}</span>
-                            </span>
-                          {{/each}}
-                        </div>
-                      {{/if}}
                     </div>
                     <div class="live-metrics-person-card__reading {{row.status_class}}">
                       <strong>{{row.bpm_label}}</strong>
                       <span>{{row.freshness_label}}</span>
                     </div>
+                    {{#if row.user.profile_details.length}}
+                      <div class="live-metrics-person-card__traits" aria-label="Public profile details">
+                        {{#each row.user.profile_details key="key" as |detail|}}
+                          <span class="live-metrics-trait {{detail.className}}" title={{detail.label}}>
+                            {{#if detail.icon}}
+                              <span class="live-metrics-trait__icon" aria-hidden="true">{{detail.icon}}</span>
+                            {{/if}}
+                            <span class="live-metrics-trait__value">{{detail.value}}</span>
+                          </span>
+                        {{/each}}
+                      </div>
+                    {{/if}}
                   </article>
                 {{/each}}
               </div>
             {{else}}
               <div class="live-metrics-empty-state live-metrics-empty-state--small">
-                <h3>No visible heartrate data yet</h3>
-                <p>Connected users appear here only after they opt in to the overview.</p>
+                <h3>No live heart-rate data right now</h3>
+                <p>Members will appear here when they enable sharing and their active provider has a recent signal.</p>
               </div>
             {{/if}}
           </section>

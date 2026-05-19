@@ -19,7 +19,7 @@
   margin-bottom: 1rem;
 
   h1 {
-    font-size: clamp(2rem, 5vw, 4rem);
+    font-size: clamp(2.75rem, 7vw, 3.25rem);
     line-height: 1;
     margin: 0 0 0.75rem;
   }
@@ -48,15 +48,6 @@
   padding: 1rem;
   display: flex;
   align-items: stretch;
-}
-
-.live-metrics-eyebrow {
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-  font-weight: 700;
-  font-size: var(--font-down-1);
-  color: var(--tertiary) !important;
-  margin-bottom: 0.75rem;
 }
 
 .live-metrics-grid {
@@ -294,9 +285,10 @@
 
 .live-metrics-person-card {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  position: relative;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 0.75rem;
-  align-items: center;
+  align-items: start;
   color: var(--primary);
   border: 1px solid var(--primary-low);
   border-radius: 16px;
@@ -325,8 +317,13 @@
 }
 
 .live-metrics-person-card__main,
-.live-metrics-person-card__reading {
+.live-metrics-person-card__reading,
+.live-metrics-person-card__traits {
   min-width: 0;
+}
+
+.live-metrics-person-card__main {
+  grid-column: 2;
 }
 
 .live-metrics-person-card__name {
@@ -344,10 +341,14 @@
 }
 
 .live-metrics-person-card__traits {
+  position: absolute;
+  right: 0.85rem;
+  bottom: 0.85rem;
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 48%;
   gap: 0.35rem;
-  margin-top: 0.35rem;
 }
 
 .live-metrics-trait {
@@ -396,12 +397,15 @@
 }
 
 .live-metrics-person-card__reading {
-  grid-column: 3;
-  grid-row: 1;
-  align-self: center;
-  justify-self: end;
-  text-align: right;
-  min-width: 5.5rem;
+  grid-column: 1 / -1;
+  align-self: end;
+  justify-self: stretch;
+  text-align: left;
+  min-width: 0;
+  margin-top: 0.2rem;
+  padding-top: 0.65rem;
+  padding-right: 8rem;
+  border-top: 1px solid var(--primary-low);
 
   strong {
     display: block;
@@ -593,12 +597,12 @@
   }
 
   .live-metrics-person-card__reading {
-    grid-column: 1 / -1;
-    grid-row: auto;
-    justify-self: stretch;
-    text-align: left;
     min-width: 0;
-    padding-top: 0.6rem;
-    border-top: 1px solid var(--primary-low);
+    text-align: left;
+    padding-right: 7rem;
+  }
+
+  .live-metrics-person-card__traits {
+    max-width: 52%;
   }
 }
