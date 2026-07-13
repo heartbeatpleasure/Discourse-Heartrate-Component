@@ -606,3 +606,98 @@
     max-width: 52%;
   }
 }
+
+
+// Live heartrate in Discourse user cards. The connector is hidden completely
+// until the shared service has a current, authorized reading.
+.user-card .metadata-row:has(.live-metrics-user-card-slot.has-reading) {
+  flex-wrap: wrap;
+}
+
+.live-metrics-user-card-slot {
+  display: none;
+
+  &.has-reading {
+    display: block;
+    flex: 1 0 100%;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+.live-metrics-user-card-reading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  width: 100%;
+  margin-top: 0.65rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--primary-low);
+  border-radius: 10px;
+  background: var(--primary-very-low);
+  color: var(--primary);
+  line-height: 1.25;
+}
+
+.live-metrics-user-card-reading__heart {
+  color: var(--danger);
+  font-size: 1.15em;
+  line-height: 1;
+}
+
+.live-metrics-user-card-reading__label {
+  flex: 1 1 auto;
+  min-width: 7.5rem;
+  color: var(--primary-medium);
+  font-weight: 600;
+}
+
+.live-metrics-user-card-reading__value {
+  color: var(--primary);
+  font-size: var(--font-up-1);
+  white-space: nowrap;
+}
+
+.live-metrics-user-card-reading__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  color: var(--primary-medium);
+  font-size: var(--font-down-1);
+  white-space: nowrap;
+}
+
+.live-metrics-user-card-reading__dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.live-metrics-toggle > span {
+  min-width: 0;
+
+  strong,
+  small {
+    display: block;
+  }
+
+  small {
+    margin-top: 0.15rem;
+    color: var(--primary-medium);
+    font-weight: 400;
+    line-height: 1.35;
+  }
+}
+
+@media screen and (max-width: 480px) {
+  .live-metrics-user-card-reading__label {
+    min-width: 0;
+  }
+
+  .live-metrics-user-card-reading__status {
+    flex-basis: 100%;
+    padding-left: 1.7rem;
+  }
+}

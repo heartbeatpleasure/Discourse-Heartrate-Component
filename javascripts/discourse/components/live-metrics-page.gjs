@@ -582,6 +582,11 @@ export default class LiveMetricsPage extends Component {
   }
 
   @action
+  async toggleUserCard(provider, event) {
+    await this.saveSettings(provider, { show_on_user_card: event.target.checked });
+  }
+
+  @action
   async toggleDirectory(provider, event) {
     await this.saveSettings(provider, { show_in_directory: event.target.checked });
   }
@@ -746,7 +751,7 @@ export default class LiveMetricsPage extends Component {
           <div class="live-metrics-manage-card__header">
             <div class="live-metrics-manage-card__title">
               <h2>Manage my heartrate sharing</h2>
-              <p>Connect providers, choose your active source, and decide whether your live heart rate appears in the overview.</p>
+              <p>Connect providers, choose your active source, and decide whether your live heart rate appears in the overview or user cards.</p>
             </div>
             <button type="button" class="btn btn-default live-metrics-manage-toggle" {{on "click" this.toggleSettings}}>
               {{this.settingsToggleLabel}}
@@ -843,8 +848,19 @@ export default class LiveMetricsPage extends Component {
 
                               {{#if provider.active}}
                                 <label class="live-metrics-toggle">
+                                  <input type="checkbox" checked={{provider.account.show_on_user_card}} disabled={{provider.provider_saving}} {{on "change" (fn this.toggleUserCard provider.provider)}} />
+                                  <span>
+                                    <strong>Show in popup user cards</strong>
+                                    <small>Only appears while your active provider has a current live signal.</small>
+                                  </span>
+                                </label>
+
+                                <label class="live-metrics-toggle">
                                   <input type="checkbox" checked={{provider.account.show_in_directory}} disabled={{provider.provider_saving}} {{on "change" (fn this.toggleDirectory provider.provider)}} />
-                                  <span>Show on the Heartrate overview</span>
+                                  <span>
+                                    <strong>Show on the Heartrate overview</strong>
+                                    <small>This also allows the live reading in the card-based user directory.</small>
+                                  </span>
                                 </label>
 
                                 <label class="live-metrics-field">
@@ -892,7 +908,7 @@ export default class LiveMetricsPage extends Component {
 
                 <ul class="live-metrics-info-list">
                   <li>You can connect multiple providers, but only one can be active at a time.</li>
-                  <li>The overview is opt-in and only uses your active provider.</li>
+                  <li>The overview and popup user cards are separate opt-ins and only use your active provider.</li>
                   <li>Staff can limit who may view the page, who may share, and which visibility choices are available.</li>
                   <li>Historical heart-rate data is not published here.</li>
                 </ul>
