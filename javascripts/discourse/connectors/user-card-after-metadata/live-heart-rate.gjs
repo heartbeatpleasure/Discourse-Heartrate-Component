@@ -57,8 +57,10 @@ export default class LiveHeartRateUserCard extends Component {
           aria-label={{this.ariaLabel}}
         >
           <span class="live-metrics-user-card-reading__heart" aria-hidden="true">♥</span>
-          <span class="live-metrics-user-card-reading__label">Heart rate</span>
-          <strong class="live-metrics-user-card-reading__value">{{this.bpmLabel}}</strong>
+          <span class="live-metrics-user-card-reading__measure">
+            <span class="live-metrics-user-card-reading__label">Heart rate</span>
+            <strong class="live-metrics-user-card-reading__value">{{this.bpmLabel}}</strong>
+          </span>
           <span class="live-metrics-user-card-reading__status">
             <span class="live-metrics-user-card-reading__dot" aria-hidden="true"></span>
             Live now
