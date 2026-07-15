@@ -796,7 +796,9 @@
 
   button {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.65rem;
     width: 100%;
     padding: 0.65rem 0.75rem;
     border: 0;
@@ -809,6 +811,31 @@
     &:last-child { border-bottom: 0; }
     &:hover, &:focus { background: var(--primary-very-low); }
     small { color: var(--primary-medium); }
+  }
+}
+
+.live-metrics-audience-avatar {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.live-metrics-audience-identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+
+  strong,
+  small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    color: var(--primary-medium);
   }
 }
 
@@ -827,9 +854,10 @@
   border-radius: 10px;
   background: var(--secondary);
 
-  span {
+  .live-metrics-audience-list__identity {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    gap: 0.65rem;
     min-width: 0;
   }
 

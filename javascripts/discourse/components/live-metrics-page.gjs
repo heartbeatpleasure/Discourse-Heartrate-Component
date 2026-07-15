@@ -22,6 +22,27 @@ function visibilityLabel(id) {
   return option?.label || String(id || "").replace(/_/g, " ");
 }
 
+function audienceAvatarUrl(user, size = 48) {
+  return String(user?.avatar_template || "").replace("{size}", String(size));
+}
+
+function decorateAudienceUser(user) {
+  if (!user) {
+    return null;
+  }
+
+  return {
+    ...user,
+    avatar_url: audienceAvatarUrl(user),
+  };
+}
+
+function decorateAudienceUsers(users) {
+  return Array.isArray(users)
+    ? users.map(decorateAudienceUser).filter(Boolean)
+    : [];
+}
+
 
 function normalizeGenderDetail(value) {
   const rawValue = String(value || "").trim();
@@ -204,6 +225,7 @@ export default class LiveMetricsPage extends Component {
   pollTimer = null;
   audienceSearchTimer = null;
   clockTimer = null;
+  refreshSequence = 0;
   hasUrlError = false;
 
   willDestroy() {
@@ -291,8 +313,8 @@ export default class LiveMetricsPage extends Component {
           this.audienceProvider === provider &&
           this.audienceMode === "blocked" &&
           this.audienceSuggestions.length > 0,
-        specific_users: account?.audience?.specific_users || [],
-        blocked_users: account?.audience?.blocked_users || [],
+        specific_users: decorateAudienceUsers(account?.audience?.specific_users),
+        blocked_users: decorateAudienceUsers(account?.audience?.blocked_users),
         visibility_public_label: this.visibilityOptionLabel(account, "public"),
         visibility_staff_label: this.visibilityOptionLabel(account, "staff"),
       };
@@ -374,6 +396,7 @@ export default class LiveMetricsPage extends Component {
 
   @action
   cleanup() {
+    this.refreshSequence += 1;
     this.stopPolling();
     this.stopClock();
     clearTimeout(this.audienceSearchTimer);
@@ -457,6 +480,7 @@ export default class LiveMetricsPage extends Component {
       return;
     }
 
+    const refreshSequence = ++this.refreshSequence;
     this.refreshing = true;
 
     try {
@@ -464,18 +488,29 @@ export default class LiveMetricsPage extends Component {
       const directoryRequest = this.config?.directory_enabled === false ? Promise.resolve({ users: [] }) : ajax("/live-metrics/api/directory");
       const [liveResult, directoryResult] = await Promise.allSettled([liveRequest, directoryRequest]);
 
+      // Ignore an older response if a newer refresh has already started. This
+      // prevents stale visibility data from overwriting a newer result.
+      if (refreshSequence !== this.refreshSequence) {
+        return;
+      }
+
       if (liveResult.status === "fulfilled") {
         this.liveAccount = liveResult.value?.account || null;
       }
 
-      if (directoryResult.status === "fulfilled") {
-        this.directoryRows = directoryResult.value?.users || [];
-      }
+      // Directory visibility is privacy-sensitive. On an API error, clear the
+      // previous rows instead of retaining data from an earlier successful poll.
+      this.directoryRows =
+        directoryResult.status === "fulfilled"
+          ? directoryResult.value?.users || []
+          : [];
 
       this.nowMs = Date.now();
     } finally {
-      this.refreshing = false;
-      this.startPolling();
+      if (refreshSequence === this.refreshSequence) {
+        this.refreshing = false;
+        this.startPolling();
+      }
     }
   }
 
@@ -650,19 +685,33 @@ export default class LiveMetricsPage extends Component {
     }
 
     this.audienceSearching = true;
-    this.audienceSearchTimer = setTimeout(() => this.searchAudienceUsers(query), 250);
+    this.audienceSearchTimer = setTimeout(
+      () => this.searchAudienceUsers(provider, mode, query),
+      250
+    );
   }
 
-  async searchAudienceUsers(query) {
+  async searchAudienceUsers(provider, mode, query) {
+    const isCurrentSearch = () =>
+      this.audienceProvider === provider &&
+      this.audienceMode === mode &&
+      this.audienceQuery.trim() === query.trim();
+
     try {
-      const response = await ajax("/live-metrics/api/user-search", { data: { q: query.trim() } });
-      if (this.audienceQuery.trim() === query.trim()) {
-        this.audienceSuggestions = response?.users || [];
+      const response = await ajax("/live-metrics/api/user-search", {
+        data: { q: query.trim(), mode },
+      });
+      if (isCurrentSearch()) {
+        this.audienceSuggestions = decorateAudienceUsers(response?.users);
       }
     } catch {
-      this.audienceSuggestions = [];
+      if (isCurrentSearch()) {
+        this.audienceSuggestions = [];
+      }
     } finally {
-      this.audienceSearching = false;
+      if (isCurrentSearch()) {
+        this.audienceSearching = false;
+      }
     }
   }
 
@@ -1028,8 +1077,11 @@ export default class LiveMetricsPage extends Component {
                                           <div class="live-metrics-audience-suggestions">
                                             {{#each this.audienceSuggestions key="username" as |user|}}
                                               <button type="button" {{on "click" (fn this.selectAudienceUser user)}}>
-                                                <span>{{user.username}}</span>
-                                                {{#if user.name}}<small>{{user.name}}</small>{{/if}}
+                                                <img class="live-metrics-audience-avatar" src={{user.avatar_url}} alt="" />
+                                                <span class="live-metrics-audience-identity">
+                                                  <strong>{{user.username}}</strong>
+                                                  {{#if user.name}}<small>{{user.name}}</small>{{/if}}
+                                                </span>
                                               </button>
                                             {{/each}}
                                           </div>
@@ -1041,7 +1093,13 @@ export default class LiveMetricsPage extends Component {
                                       <div class="live-metrics-audience-list">
                                         {{#each provider.specific_users key="username" as |user|}}
                                           <div class="live-metrics-audience-list__item">
-                                            <span><strong>{{user.username}}</strong>{{#if user.name}}<small>{{user.name}}</small>{{/if}}</span>
+                                            <div class="live-metrics-audience-list__identity">
+                                              <img class="live-metrics-audience-avatar" src={{user.avatar_url}} alt="" />
+                                              <span class="live-metrics-audience-identity">
+                                                <strong>{{user.username}}</strong>
+                                                {{#if user.name}}<small>{{user.name}}</small>{{/if}}
+                                              </span>
+                                            </div>
                                             <button type="button" class="btn btn-flat" disabled={{this.audienceUpdating}} {{on "click" (fn this.removeAudienceUser provider.provider "specific" user)}}>Remove</button>
                                           </div>
                                         {{/each}}
@@ -1065,8 +1123,11 @@ export default class LiveMetricsPage extends Component {
                                           <div class="live-metrics-audience-suggestions">
                                             {{#each this.audienceSuggestions key="username" as |user|}}
                                               <button type="button" {{on "click" (fn this.selectAudienceUser user)}}>
-                                                <span>{{user.username}}</span>
-                                                {{#if user.name}}<small>{{user.name}}</small>{{/if}}
+                                                <img class="live-metrics-audience-avatar" src={{user.avatar_url}} alt="" />
+                                                <span class="live-metrics-audience-identity">
+                                                  <strong>{{user.username}}</strong>
+                                                  {{#if user.name}}<small>{{user.name}}</small>{{/if}}
+                                                </span>
                                               </button>
                                             {{/each}}
                                           </div>
@@ -1078,7 +1139,13 @@ export default class LiveMetricsPage extends Component {
                                       <div class="live-metrics-audience-list">
                                         {{#each provider.blocked_users key="username" as |user|}}
                                           <div class="live-metrics-audience-list__item">
-                                            <span><strong>{{user.username}}</strong>{{#if user.name}}<small>{{user.name}}</small>{{/if}}</span>
+                                            <div class="live-metrics-audience-list__identity">
+                                              <img class="live-metrics-audience-avatar" src={{user.avatar_url}} alt="" />
+                                              <span class="live-metrics-audience-identity">
+                                                <strong>{{user.username}}</strong>
+                                                {{#if user.name}}<small>{{user.name}}</small>{{/if}}
+                                              </span>
+                                            </div>
                                             <button type="button" class="btn btn-flat" disabled={{this.audienceUpdating}} {{on "click" (fn this.removeAudienceUser provider.provider "blocked" user)}}>Remove</button>
                                           </div>
                                         {{/each}}

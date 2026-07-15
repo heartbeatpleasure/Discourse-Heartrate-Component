@@ -208,14 +208,15 @@ export default class LiveMetricsUserCardsService extends Service {
       this.scheduleExpiry();
     } catch (error) {
       const status = Number(error?.jqXHR?.status || error?.status);
+
+      // User-card visibility is privacy-sensitive. Never retain a reading from
+      // an earlier successful request when the current permission check fails or
+      // the endpoint is temporarily unavailable.
+      this.readings = new Map();
+
       if ([403, 404, 503].includes(status)) {
         this.blocked = true;
         this.stopTimers();
-        this.readings = new Map();
-      } else {
-        // User cards are an optional enhancement. Keep the card clean and let
-        // any existing reading expire naturally after a temporary failure.
-        this.pruneExpiredReadings();
       }
     } finally {
       this.requestInFlight = false;
