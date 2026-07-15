@@ -55,6 +55,8 @@ export default class LiveMetricsUserCardsService extends Service {
   requestInFlight = false;
   refreshRequested = false;
   blocked = false;
+  transientFailureCount = 0;
+  retryDelayMs = null;
 
   get enabled() {
     return this.siteSettings?.live_metrics_enabled !== false;
@@ -115,6 +117,9 @@ export default class LiveMetricsUserCardsService extends Service {
     if (this.registrations.size === 0) {
       this.stopTimers();
       this.readings = new Map();
+      this.refreshRequested = false;
+      this.transientFailureCount = 0;
+      this.retryDelayMs = null;
     } else {
       this.scheduleExpiry();
     }
@@ -205,6 +210,8 @@ export default class LiveMetricsUserCardsService extends Service {
       }
 
       this.readings = nextReadings;
+      this.transientFailureCount = 0;
+      this.retryDelayMs = null;
       this.scheduleExpiry();
     } catch (error) {
       const status = Number(error?.jqXHR?.status || error?.status);
@@ -214,21 +221,47 @@ export default class LiveMetricsUserCardsService extends Service {
       // the endpoint is temporarily unavailable.
       this.readings = new Map();
 
-      if ([403, 404, 503].includes(status)) {
+      const permanentClientError =
+        status >= 400 && status < 500 && status !== 429;
+
+      if (permanentClientError) {
         this.blocked = true;
+        this.retryDelayMs = null;
         this.stopTimers();
+      } else {
+        // Network failures, 429s and temporary 5xx responses must hide the old
+        // value immediately, but should recover automatically without requiring
+        // a full page refresh.
+        this.transientFailureCount += 1;
+        this.retryDelayMs = this.transientRetryDelayMs(error);
       }
     } finally {
       this.requestInFlight = false;
 
       if (!this.blocked && this.registrations.size > 0) {
-        if (this.refreshRequested) {
+        if (this.retryDelayMs !== null) {
+          this.scheduleRefresh(this.retryDelayMs);
+        } else if (this.refreshRequested) {
           this.scheduleRefresh(0);
         } else {
           this.scheduleRefresh(this.pollIntervalMs);
         }
       }
     }
+  }
+
+  transientRetryDelayMs(error) {
+    const retryAfter = Number(
+      error?.jqXHR?.getResponseHeader?.("Retry-After") || 0
+    );
+    if (Number.isFinite(retryAfter) && retryAfter > 0) {
+      return Math.min(retryAfter * 1000, 120_000);
+    }
+
+    const exponent = Math.min(Math.max(this.transientFailureCount - 1, 0), 5);
+    const baseDelay = Math.min(2000 * 2 ** exponent, 60_000);
+    const jitter = Math.floor(Math.random() * 500);
+    return baseDelay + jitter;
   }
 
   pruneExpiredReadings() {
