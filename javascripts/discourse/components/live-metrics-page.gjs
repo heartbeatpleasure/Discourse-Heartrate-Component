@@ -4,8 +4,6 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 import { on } from "@ember/modifier";
 import { fn } from "@ember/helper";
-import and from "ember-truth-helpers/helpers/and";
-import eq from "ember-truth-helpers/helpers/eq";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
 import { ajax } from "discourse/lib/ajax";
 import I18n from "I18n";
@@ -285,6 +283,14 @@ export default class LiveMetricsPage extends Component {
         visibility_logged_in_label: this.visibilityOptionLabel(account, "logged_in"),
         show_specific_users: account?.visibility === "specific_users",
         show_blocked_users: account?.visibility === "logged_in",
+        show_specific_suggestions:
+          this.audienceProvider === provider &&
+          this.audienceMode === "specific" &&
+          this.audienceSuggestions.length > 0,
+        show_blocked_suggestions:
+          this.audienceProvider === provider &&
+          this.audienceMode === "blocked" &&
+          this.audienceSuggestions.length > 0,
         specific_users: account?.audience?.specific_users || [],
         blocked_users: account?.audience?.blocked_users || [],
         visibility_public_label: this.visibilityOptionLabel(account, "public"),
@@ -1018,7 +1024,7 @@ export default class LiveMetricsPage extends Component {
                                     <div class="live-metrics-audience-search">
                                       <div class="live-metrics-audience-search__input">
                                         <input type="text" value={{this.audienceQuery}} placeholder="Search username" autocomplete="off" disabled={{this.audienceUpdating}} {{on "input" (fn this.updateAudienceQuery provider.provider "specific")}} />
-                                        {{#if (and (eq this.audienceProvider provider.provider) (eq this.audienceMode "specific") this.audienceSuggestions.length)}}
+                                        {{#if provider.show_specific_suggestions}}
                                           <div class="live-metrics-audience-suggestions">
                                             {{#each this.audienceSuggestions key="username" as |user|}}
                                               <button type="button" {{on "click" (fn this.selectAudienceUser user)}}>
@@ -1055,7 +1061,7 @@ export default class LiveMetricsPage extends Component {
                                     <div class="live-metrics-audience-search">
                                       <div class="live-metrics-audience-search__input">
                                         <input type="text" value={{this.audienceQuery}} placeholder="Search username" autocomplete="off" disabled={{this.audienceUpdating}} {{on "input" (fn this.updateAudienceQuery provider.provider "blocked")}} />
-                                        {{#if (and (eq this.audienceProvider provider.provider) (eq this.audienceMode "blocked") this.audienceSuggestions.length)}}
+                                        {{#if provider.show_blocked_suggestions}}
                                           <div class="live-metrics-audience-suggestions">
                                             {{#each this.audienceSuggestions key="username" as |user|}}
                                               <button type="button" {{on "click" (fn this.selectAudienceUser user)}}>
