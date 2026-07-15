@@ -11,6 +11,7 @@ import I18n from "I18n";
 const PROVIDER_ORDER = ["pulsoid", "hyperate"];
 const URL_ERROR_DISMISS_MS = 20_000;
 const URL_NOTICE_DISMISS_MS = 10_000;
+const LIVE_METRICS_STATUS_EVENT = "hb-live-metrics:status-update";
 const DEFAULT_VISIBILITY_OPTIONS = [
   { id: "private", label: "Only me" },
   { id: "specific_users", label: "Specific users" },
@@ -18,6 +19,19 @@ const DEFAULT_VISIBILITY_OPTIONS = [
   { id: "public", label: "Public" },
   { id: "staff", label: "Staff only" },
 ];
+
+function publishDirectoryCount(rows) {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
+    return;
+  }
+
+  const count = Array.isArray(rows) ? rows.length : 0;
+  window.dispatchEvent(
+    new CustomEvent(LIVE_METRICS_STATUS_EVENT, {
+      detail: { live: count > 0, count },
+    })
+  );
+}
 
 function visibilityLabel(id) {
   const option = DEFAULT_VISIBILITY_OPTIONS.find((item) => item.id === id);
@@ -592,6 +606,7 @@ export default class LiveMetricsPage extends Component {
         directoryResult.status === "fulfilled"
           ? directoryResult.value?.users || []
           : [];
+      publishDirectoryCount(this.directoryRows);
 
       this.nowMs = Date.now();
     } finally {

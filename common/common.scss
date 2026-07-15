@@ -649,6 +649,38 @@
 }
 
 
+// Personalized live sharer count for navigation links to /live-metrics.
+// Kept visually identical to the Livestream component badge.
+.hb-live-metrics-live-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1;
+
+  color: var(--secondary);
+  background: var(--danger);
+
+  pointer-events: none;
+  vertical-align: middle;
+}
+
+.sidebar-wrapper a .hb-live-metrics-live-badge,
+.sidebar-section a .hb-live-metrics-live-badge {
+  margin-left: auto;
+}
+
+#navigation-bar a .hb-live-metrics-live-badge {
+  margin-left: 0.5em;
+}
+
 // Live heartrate in Discourse user cards. The connector is hidden completely
 // until the shared service has a current, authorized reading.
 .user-card .metadata-row:has(.live-metrics-user-card-slot.has-reading) {
