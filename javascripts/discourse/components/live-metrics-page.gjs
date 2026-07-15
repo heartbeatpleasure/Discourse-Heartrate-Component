@@ -59,6 +59,20 @@ function decorateAudienceUsers(users) {
     : [];
 }
 
+function compareDirectoryAccounts(left, right) {
+  const leftUsername = String(left?.user?.username || "");
+  const rightUsername = String(right?.user?.username || "");
+  const usernameOrder = leftUsername.localeCompare(rightUsername, undefined, {
+    sensitivity: "base",
+    numeric: true,
+  });
+
+  if (usernameOrder !== 0) {
+    return usernameOrder;
+  }
+
+  return String(left?.row_key || "").localeCompare(String(right?.row_key || ""));
+}
 
 function normalizeGenderDetail(value) {
   const rawValue = String(value || "").trim();
@@ -276,7 +290,8 @@ export default class LiveMetricsPage extends Component {
   get directory() {
     return (this.directoryRows || [])
       .map((row) => decorateAccount(row, this.nowMs))
-      .filter((row) => row?.live?.status === "live" && row?.live?.heart_rate);
+      .filter((row) => row?.live?.status === "live" && row?.live?.heart_rate)
+      .sort(compareDirectoryAccounts);
   }
 
   get providerRows() {
@@ -1137,7 +1152,7 @@ export default class LiveMetricsPage extends Component {
                               <form class="live-metrics-connect-form" {{on "submit" this.connectHyperate}}>
                                 <label class="live-metrics-field">
                                   <span>HypeRate device ID</span>
-                                  <input type="text" value={{this.hyperateDeviceId}} disabled={{provider.connect_disabled}} {{on "input" this.updateHyperateDeviceId}} placeholder="Enter your HypeRate device ID" />
+                                  <input type="text" value={{this.hyperateDeviceId}} disabled={{provider.connect_disabled}} {{on "input" this.updateHyperateDeviceId}} placeholder="Paste device ID" />
                                   <small class="live-metrics-field__help">Use the device/user ID provided by HypeRate. The site API key stays server-side.</small>
                                 </label>
                                 <button type="submit" class="btn btn-primary" disabled={{this.hyperateConnectDisabled}}>

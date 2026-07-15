@@ -517,7 +517,9 @@
   align-items: end;
 
   input[type="text"] {
-    max-width: 320px;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 420px;
     border: 1px solid var(--primary-low);
     border-radius: 10px;
     background: var(--secondary);
