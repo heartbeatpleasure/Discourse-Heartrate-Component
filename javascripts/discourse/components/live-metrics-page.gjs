@@ -4,6 +4,8 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 import { on } from "@ember/modifier";
 import { fn } from "@ember/helper";
+import and from "ember-truth-helpers/helpers/and";
+import eq from "ember-truth-helpers/helpers/eq";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
 import { ajax } from "discourse/lib/ajax";
 import I18n from "I18n";
@@ -11,7 +13,8 @@ import I18n from "I18n";
 const PROVIDER_ORDER = ["pulsoid", "hyperate"];
 const DEFAULT_VISIBILITY_OPTIONS = [
   { id: "private", label: "Only me" },
-  { id: "logged_in", label: "Logged-in users" },
+  { id: "specific_users", label: "Specific users" },
+  { id: "logged_in", label: "All members" },
   { id: "public", label: "Public" },
   { id: "staff", label: "Staff only" },
 ];
@@ -81,6 +84,7 @@ function decorateSettingsAccount(account) {
     active: account.active === true,
     visibility,
     visibility_private: visibility === "private",
+    visibility_specific_users: visibility === "specific_users",
     visibility_logged_in: visibility === "logged_in",
     visibility_public: visibility === "public",
     visibility_staff: visibility === "staff",
@@ -191,8 +195,16 @@ export default class LiveMetricsPage extends Component {
   @tracked nowMs = Date.now();
   @tracked hyperateDeviceId = "";
   @tracked settingsOpen = false;
+  @tracked audienceQuery = "";
+  @tracked audienceSuggestions = [];
+  @tracked audienceSearching = false;
+  @tracked audienceUpdating = false;
+  @tracked audienceProvider = null;
+  @tracked audienceMode = null;
+  @tracked selectedAudienceUsername = null;
 
   pollTimer = null;
+  audienceSearchTimer = null;
   clockTimer = null;
   hasUrlError = false;
 
@@ -259,15 +271,22 @@ export default class LiveMetricsPage extends Component {
         provider_saving: saving,
         activate_disabled: activating || !this.canShare,
         visibility_show_private: this.showVisibilityOption(account, "private"),
+        visibility_show_specific_users: this.showVisibilityOption(account, "specific_users"),
         visibility_show_logged_in: this.showVisibilityOption(account, "logged_in"),
         visibility_show_public: this.showVisibilityOption(account, "public"),
         visibility_show_staff: this.showVisibilityOption(account, "staff"),
         visibility_private_disabled: this.visibilityOptionDisabled(account, "private"),
+        visibility_specific_users_disabled: this.visibilityOptionDisabled(account, "specific_users"),
         visibility_logged_in_disabled: this.visibilityOptionDisabled(account, "logged_in"),
         visibility_public_disabled: this.visibilityOptionDisabled(account, "public"),
         visibility_staff_disabled: this.visibilityOptionDisabled(account, "staff"),
         visibility_private_label: this.visibilityOptionLabel(account, "private"),
+        visibility_specific_users_label: this.visibilityOptionLabel(account, "specific_users"),
         visibility_logged_in_label: this.visibilityOptionLabel(account, "logged_in"),
+        show_specific_users: account?.visibility === "specific_users",
+        show_blocked_users: account?.visibility === "logged_in",
+        specific_users: account?.audience?.specific_users || [],
+        blocked_users: account?.audience?.blocked_users || [],
         visibility_public_label: this.visibilityOptionLabel(account, "public"),
         visibility_staff_label: this.visibilityOptionLabel(account, "staff"),
       };
@@ -351,6 +370,7 @@ export default class LiveMetricsPage extends Component {
   cleanup() {
     this.stopPolling();
     this.stopClock();
+    clearTimeout(this.audienceSearchTimer);
   }
 
   readUrlNotice() {
@@ -604,7 +624,101 @@ export default class LiveMetricsPage extends Component {
 
   @action
   async changeVisibility(provider, event) {
+    this.resetAudienceSearch();
     await this.saveSettings(provider, { visibility: event.target.value });
+  }
+
+  @action
+  updateAudienceQuery(provider, mode, event) {
+    const query = event.target.value;
+    this.audienceProvider = provider;
+    this.audienceMode = mode;
+    this.audienceQuery = query;
+    this.selectedAudienceUsername = null;
+    clearTimeout(this.audienceSearchTimer);
+
+    if (query.trim().length < 2) {
+      this.audienceSuggestions = [];
+      this.audienceSearching = false;
+      return;
+    }
+
+    this.audienceSearching = true;
+    this.audienceSearchTimer = setTimeout(() => this.searchAudienceUsers(query), 250);
+  }
+
+  async searchAudienceUsers(query) {
+    try {
+      const response = await ajax("/live-metrics/api/user-search", { data: { q: query.trim() } });
+      if (this.audienceQuery.trim() === query.trim()) {
+        this.audienceSuggestions = response?.users || [];
+      }
+    } catch {
+      this.audienceSuggestions = [];
+    } finally {
+      this.audienceSearching = false;
+    }
+  }
+
+  @action
+  selectAudienceUser(user) {
+    this.audienceQuery = user.username;
+    this.selectedAudienceUsername = user.username;
+    this.audienceSuggestions = [];
+  }
+
+  @action
+  async addAudienceUser(provider, mode) {
+    const username = (this.selectedAudienceUsername || this.audienceQuery).trim();
+    if (username.length < 2 || this.audienceUpdating) {
+      return;
+    }
+
+    this.audienceUpdating = true;
+    this.error = null;
+    try {
+      this.me = await ajax(`/live-metrics/api/accounts/${provider}/audience-users`, {
+        type: "PUT",
+        data: { mode, username },
+      });
+      this.resetAudienceSearch();
+      this.notice = mode === "specific" ? `${username} can now view your heartrate.` : `${username} is now blocked from viewing your heartrate.`;
+      this.refreshLiveSections();
+    } catch (error) {
+      this.error = error?.jqXHR?.responseJSON?.message || "The member could not be added.";
+    } finally {
+      this.audienceUpdating = false;
+    }
+  }
+
+  @action
+  async removeAudienceUser(provider, mode, user) {
+    if (this.audienceUpdating) {
+      return;
+    }
+    this.audienceUpdating = true;
+    this.error = null;
+    try {
+      this.me = await ajax(`/live-metrics/api/accounts/${provider}/audience-users`, {
+        type: "DELETE",
+        data: { mode, username: user.username },
+      });
+      this.refreshLiveSections();
+    } catch (error) {
+      this.error = error?.jqXHR?.responseJSON?.message || "The member could not be removed.";
+    } finally {
+      this.audienceUpdating = false;
+    }
+  }
+
+  resetAudienceSearch() {
+    clearTimeout(this.audienceSearchTimer);
+    this.audienceQuery = "";
+    this.audienceSuggestions = [];
+    this.audienceSearching = false;
+    this.audienceProvider = null;
+    this.audienceMode = null;
+    this.selectedAudienceUsername = null;
   }
 
   async saveSettings(provider, changes) {
@@ -880,6 +994,9 @@ export default class LiveMetricsPage extends Component {
                                     {{#if provider.visibility_show_private}}
                                       <option value="private" selected={{provider.account.visibility_private}} disabled={{provider.visibility_private_disabled}}>{{provider.visibility_private_label}}</option>
                                     {{/if}}
+                                    {{#if provider.visibility_show_specific_users}}
+                                      <option value="specific_users" selected={{provider.account.visibility_specific_users}} disabled={{provider.visibility_specific_users_disabled}}>{{provider.visibility_specific_users_label}}</option>
+                                    {{/if}}
                                     {{#if provider.visibility_show_logged_in}}
                                       <option value="logged_in" selected={{provider.account.visibility_logged_in}} disabled={{provider.visibility_logged_in_disabled}}>{{provider.visibility_logged_in_label}}</option>
                                     {{/if}}
@@ -890,8 +1007,81 @@ export default class LiveMetricsPage extends Component {
                                       <option value="staff" selected={{provider.account.visibility_staff}} disabled={{provider.visibility_staff_disabled}}>{{provider.visibility_staff_label}}</option>
                                     {{/if}}
                                   </select>
-                                  <small class="live-metrics-field__help">Only the visibility choices enabled by staff are shown here.</small>
                                 </label>
+
+                                {{#if provider.show_specific_users}}
+                                  <section class="live-metrics-audience-panel">
+                                    <div>
+                                      <strong>Specific users</strong>
+                                      <p>Only the members added here can see your live heartrate on the overview and in popup user cards.</p>
+                                    </div>
+                                    <div class="live-metrics-audience-search">
+                                      <div class="live-metrics-audience-search__input">
+                                        <input type="text" value={{this.audienceQuery}} placeholder="Search username" autocomplete="off" disabled={{this.audienceUpdating}} {{on "input" (fn this.updateAudienceQuery provider.provider "specific")}} />
+                                        {{#if (and (eq this.audienceProvider provider.provider) (eq this.audienceMode "specific") this.audienceSuggestions.length)}}
+                                          <div class="live-metrics-audience-suggestions">
+                                            {{#each this.audienceSuggestions key="username" as |user|}}
+                                              <button type="button" {{on "click" (fn this.selectAudienceUser user)}}>
+                                                <span>{{user.username}}</span>
+                                                {{#if user.name}}<small>{{user.name}}</small>{{/if}}
+                                              </button>
+                                            {{/each}}
+                                          </div>
+                                        {{/if}}
+                                      </div>
+                                      <button type="button" class="btn btn-default" disabled={{this.audienceUpdating}} {{on "click" (fn this.addAudienceUser provider.provider "specific")}}>Add</button>
+                                    </div>
+                                    {{#if provider.specific_users.length}}
+                                      <div class="live-metrics-audience-list">
+                                        {{#each provider.specific_users key="username" as |user|}}
+                                          <div class="live-metrics-audience-list__item">
+                                            <span><strong>{{user.username}}</strong>{{#if user.name}}<small>{{user.name}}</small>{{/if}}</span>
+                                            <button type="button" class="btn btn-flat" disabled={{this.audienceUpdating}} {{on "click" (fn this.removeAudienceUser provider.provider "specific" user)}}>Remove</button>
+                                          </div>
+                                        {{/each}}
+                                      </div>
+                                    {{else}}
+                                      <p class="live-metrics-muted live-metrics-muted--small">No specific users have been added yet.</p>
+                                    {{/if}}
+                                  </section>
+                                {{/if}}
+
+                                {{#if provider.show_blocked_users}}
+                                  <section class="live-metrics-audience-panel">
+                                    <div>
+                                      <strong>Blocked users</strong>
+                                      <p>All members can see your live heartrate except the members added here.</p>
+                                    </div>
+                                    <div class="live-metrics-audience-search">
+                                      <div class="live-metrics-audience-search__input">
+                                        <input type="text" value={{this.audienceQuery}} placeholder="Search username" autocomplete="off" disabled={{this.audienceUpdating}} {{on "input" (fn this.updateAudienceQuery provider.provider "blocked")}} />
+                                        {{#if (and (eq this.audienceProvider provider.provider) (eq this.audienceMode "blocked") this.audienceSuggestions.length)}}
+                                          <div class="live-metrics-audience-suggestions">
+                                            {{#each this.audienceSuggestions key="username" as |user|}}
+                                              <button type="button" {{on "click" (fn this.selectAudienceUser user)}}>
+                                                <span>{{user.username}}</span>
+                                                {{#if user.name}}<small>{{user.name}}</small>{{/if}}
+                                              </button>
+                                            {{/each}}
+                                          </div>
+                                        {{/if}}
+                                      </div>
+                                      <button type="button" class="btn btn-default" disabled={{this.audienceUpdating}} {{on "click" (fn this.addAudienceUser provider.provider "blocked")}}>Add</button>
+                                    </div>
+                                    {{#if provider.blocked_users.length}}
+                                      <div class="live-metrics-audience-list">
+                                        {{#each provider.blocked_users key="username" as |user|}}
+                                          <div class="live-metrics-audience-list__item">
+                                            <span><strong>{{user.username}}</strong>{{#if user.name}}<small>{{user.name}}</small>{{/if}}</span>
+                                            <button type="button" class="btn btn-flat" disabled={{this.audienceUpdating}} {{on "click" (fn this.removeAudienceUser provider.provider "blocked" user)}}>Remove</button>
+                                          </div>
+                                        {{/each}}
+                                      </div>
+                                    {{else}}
+                                      <p class="live-metrics-muted live-metrics-muted--small">No members are blocked.</p>
+                                    {{/if}}
+                                  </section>
+                                {{/if}}
                               {{else}}
                                 <p class="live-metrics-muted live-metrics-muted--small">Sharing settings are available after making this provider active.</p>
                               {{/if}}
