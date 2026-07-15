@@ -9,6 +9,8 @@ import { ajax } from "discourse/lib/ajax";
 import I18n from "I18n";
 
 const PROVIDER_ORDER = ["pulsoid", "hyperate"];
+const URL_ERROR_DISMISS_MS = 20_000;
+const URL_NOTICE_DISMISS_MS = 10_000;
 const DEFAULT_VISIBILITY_OPTIONS = [
   { id: "private", label: "Only me" },
   { id: "specific_users", label: "Specific users" },
@@ -225,6 +227,8 @@ export default class LiveMetricsPage extends Component {
   pollTimer = null;
   audienceSearchTimer = null;
   clockTimer = null;
+  errorDismissTimer = null;
+  noticeDismissTimer = null;
   refreshSequence = 0;
   hasUrlError = false;
 
@@ -400,6 +404,75 @@ export default class LiveMetricsPage extends Component {
     this.stopPolling();
     this.stopClock();
     clearTimeout(this.audienceSearchTimer);
+    this.clearAlertTimers();
+  }
+
+  clearAlertTimers() {
+    clearTimeout(this.errorDismissTimer);
+    clearTimeout(this.noticeDismissTimer);
+    this.errorDismissTimer = null;
+    this.noticeDismissTimer = null;
+  }
+
+  scheduleErrorDismiss(message) {
+    clearTimeout(this.errorDismissTimer);
+    this.errorDismissTimer = setTimeout(() => {
+      if (this.error === message) {
+        this.error = null;
+      }
+      this.hasUrlError = false;
+      this.errorDismissTimer = null;
+    }, URL_ERROR_DISMISS_MS);
+  }
+
+  scheduleNoticeDismiss(message) {
+    clearTimeout(this.noticeDismissTimer);
+    this.noticeDismissTimer = setTimeout(() => {
+      if (this.notice === message) {
+        this.notice = null;
+      }
+      this.noticeDismissTimer = null;
+    }, URL_NOTICE_DISMISS_MS);
+  }
+
+  removeUrlNoticeParameters() {
+    try {
+      const url = new URL(window.location.href);
+      const hadNoticeParameters =
+        url.searchParams.has("connected") ||
+        url.searchParams.has("error") ||
+        url.searchParams.has("error_description");
+
+      if (!hadNoticeParameters) {
+        return;
+      }
+
+      url.searchParams.delete("connected");
+      url.searchParams.delete("error");
+      url.searchParams.delete("error_description");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${url.search}${url.hash}`
+      );
+    } catch {
+      // Removing callback parameters is a UX improvement only.
+    }
+  }
+
+  @action
+  dismissError() {
+    clearTimeout(this.errorDismissTimer);
+    this.errorDismissTimer = null;
+    this.error = null;
+    this.hasUrlError = false;
+  }
+
+  @action
+  dismissNotice() {
+    clearTimeout(this.noticeDismissTimer);
+    this.noticeDismissTimer = null;
+    this.notice = null;
   }
 
   readUrlNotice() {
@@ -411,12 +484,21 @@ export default class LiveMetricsPage extends Component {
       const error = params.get("error");
 
       if (connected === "pulsoid") {
-        this.notice = "Pulsoid connected and selected as your active provider.";
+        const message = "Pulsoid connected and selected as your active provider.";
+        this.notice = message;
+        this.scheduleNoticeDismiss(message);
       }
 
       if (error) {
+        const message = this.errorMessage(error);
+        this.notice = null;
         this.hasUrlError = true;
-        this.error = this.errorMessage(error);
+        this.error = message;
+        this.scheduleErrorDismiss(message);
+      }
+
+      if (connected || error) {
+        this.removeUrlNoticeParameters();
       }
     } catch {
       // Ignore malformed location data.
@@ -437,8 +519,14 @@ export default class LiveMetricsPage extends Component {
         return "Heartrate is still being prepared after an update. Please try again shortly or contact staff.";
       case "sharing_not_allowed":
         return "Your account is not allowed to connect or share heartrate data.";
+      case "access_denied":
+      case "authorization_cancelled":
+      case "authorization_canceled":
+      case "cancelled":
+      case "canceled":
+        return "Connecting to Pulsoid was cancelled.";
       default:
-        return "The heartrate action could not be completed.";
+        return "Connecting to Pulsoid could not be completed. Please try again.";
     }
   }
 
@@ -856,11 +944,39 @@ export default class LiveMetricsPage extends Component {
       </section>
 
       {{#if this.notice}}
-        <div class="live-metrics-alert live-metrics-alert--success">{{this.notice}}</div>
+        <div
+          class="live-metrics-alert live-metrics-alert--success live-metrics-alert--dismissible"
+          role="status"
+        >
+          <span class="live-metrics-alert__message">{{this.notice}}</span>
+          <button
+            type="button"
+            class="live-metrics-alert__dismiss"
+            aria-label="Dismiss message"
+            title="Dismiss"
+            {{on "click" this.dismissNotice}}
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
       {{/if}}
 
       {{#if this.error}}
-        <div class="live-metrics-alert live-metrics-alert--error">{{this.error}}</div>
+        <div
+          class="live-metrics-alert live-metrics-alert--error live-metrics-alert--dismissible"
+          role="alert"
+        >
+          <span class="live-metrics-alert__message">{{this.error}}</span>
+          <button
+            type="button"
+            class="live-metrics-alert__dismiss"
+            aria-label="Dismiss error message"
+            title="Dismiss"
+            {{on "click" this.dismissError}}
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
       {{/if}}
 
       {{#if this.loading}}
