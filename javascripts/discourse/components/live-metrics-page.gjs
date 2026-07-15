@@ -194,6 +194,7 @@ export default class LiveMetricsPage extends Component {
 
   pollTimer = null;
   clockTimer = null;
+  hasUrlError = false;
 
   willDestroy() {
     if (super.willDestroy) {
@@ -353,6 +354,8 @@ export default class LiveMetricsPage extends Component {
   }
 
   readUrlNotice() {
+    this.hasUrlError = false;
+
     try {
       const params = new URLSearchParams(window.location.search);
       const connected = params.get("connected");
@@ -363,6 +366,7 @@ export default class LiveMetricsPage extends Component {
       }
 
       if (error) {
+        this.hasUrlError = true;
         this.error = this.errorMessage(error);
       }
     } catch {
@@ -380,6 +384,8 @@ export default class LiveMetricsPage extends Component {
         return "Pulsoid did not return an authorization code. Please try again.";
       case "pulsoid_connect_failed":
         return "Pulsoid could not be connected. Please try again or contact staff.";
+      case "database_not_ready":
+        return "Heartrate is still being prepared after an update. Please try again shortly or contact staff.";
       case "sharing_not_allowed":
         return "Your account is not allowed to connect or share heartrate data.";
       default:
@@ -388,7 +394,9 @@ export default class LiveMetricsPage extends Component {
   }
 
   async loadInitial() {
-    this.error = null;
+    if (!this.hasUrlError) {
+      this.error = null;
+    }
     this.loading = true;
 
     try {
@@ -480,14 +488,17 @@ export default class LiveMetricsPage extends Component {
   }
 
   @action
-  connectPulsoid() {
+  connectPulsoid(event) {
+    event?.preventDefault?.();
+
     if (!this.canShare) {
       this.error = "Your account is not allowed to connect or share heartrate data.";
       return;
     }
 
     const url = this.config?.providers?.pulsoid?.connect_url || "/live-metrics/api/connect/pulsoid";
-    window.location.href = url;
+    const destination = new URL(url, window.location.origin).href;
+    window.location.assign(destination);
   }
 
   @action
