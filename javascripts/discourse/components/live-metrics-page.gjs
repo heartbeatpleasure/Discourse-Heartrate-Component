@@ -47,9 +47,14 @@ function decorateAudienceUser(user) {
     return null;
   }
 
+  const username = String(user.username || "member");
+
   return {
     ...user,
     avatar_url: audienceAvatarUrl(user),
+    select_label: `Select ${username}`,
+    remove_specific_label: `Remove ${username} from specific users`,
+    remove_blocked_label: `Remove ${username} from blocked users`,
   };
 }
 
@@ -57,6 +62,14 @@ function decorateAudienceUsers(users) {
   return Array.isArray(users)
     ? users.map(decorateAudienceUser).filter(Boolean)
     : [];
+}
+
+function decorateAudienceSuggestions(users, provider, mode, activeIndex = -1) {
+  return decorateAudienceUsers(users).map((user, index) => ({
+    ...user,
+    option_id: `live-metrics-${provider}-${mode}-option-${index}`,
+    active: index === activeIndex,
+  }));
 }
 
 function compareDirectoryAccounts(left, right) {
@@ -156,6 +169,7 @@ function decorateAccount(account, nowMs = Date.now()) {
         ...account.user,
         avatar_url: String(account.user.avatar_template || "").replace("{size}", "64"),
         profile_details: decorateProfileDetails(account.user.profile_details),
+        user_card_label: `Open user card for ${account.user.username}`,
       }
     : null;
 
@@ -251,6 +265,7 @@ export default class LiveMetricsPage extends Component {
   @tracked audienceProvider = null;
   @tracked audienceMode = null;
   @tracked selectedAudienceUsername = null;
+  @tracked audienceActiveIndex = -1;
 
   pollTimer = null;
   audienceSearchTimer = null;
@@ -258,6 +273,7 @@ export default class LiveMetricsPage extends Component {
   errorDismissTimer = null;
   noticeDismissTimer = null;
   refreshSequence = 0;
+  audienceSearchSequence = 0;
   hasUrlError = false;
 
   willDestroy() {
@@ -346,6 +362,16 @@ export default class LiveMetricsPage extends Component {
           this.audienceProvider === provider &&
           this.audienceMode === "blocked" &&
           this.audienceSuggestions.length > 0,
+        specific_input_id: `live-metrics-${provider}-specific-user-search`,
+        specific_listbox_id: `live-metrics-${provider}-specific-user-suggestions`,
+        blocked_input_id: `live-metrics-${provider}-blocked-user-search`,
+        blocked_listbox_id: `live-metrics-${provider}-blocked-user-suggestions`,
+        specific_add_disabled: this.audienceAddDisabled(provider, "specific"),
+        blocked_add_disabled: this.audienceAddDisabled(provider, "blocked"),
+        specific_active_descendant: this.audienceActiveDescendantFor(provider, "specific"),
+        blocked_active_descendant: this.audienceActiveDescendantFor(provider, "blocked"),
+        specific_status_message: this.audienceStatusMessageFor(provider, "specific"),
+        blocked_status_message: this.audienceStatusMessageFor(provider, "blocked"),
         specific_users: decorateAudienceUsers(account?.audience?.specific_users),
         blocked_users: decorateAudienceUsers(account?.audience?.blocked_users),
         visibility_public_label: this.visibilityOptionLabel(account, "public"),
@@ -400,6 +426,49 @@ export default class LiveMetricsPage extends Component {
     return this.settingsOpen ? "Hide connection settings" : "Manage my connections";
   }
 
+  audienceSearchActive(provider, mode) {
+    return this.audienceProvider === provider && this.audienceMode === mode;
+  }
+
+  audienceActiveDescendantFor(provider, mode) {
+    if (!this.audienceSearchActive(provider, mode)) {
+      return null;
+    }
+
+    return this.audienceSuggestions.find((user) => user.active)?.option_id || null;
+  }
+
+  audienceStatusMessageFor(provider, mode) {
+    return this.audienceSearchActive(provider, mode) ? this.audienceStatusMessage : "";
+  }
+
+  get audienceStatusMessage() {
+    const query = this.audienceQuery.trim();
+
+    if (this.audienceSearching) {
+      return "Searching for members.";
+    }
+
+    if (this.selectedAudienceUsername) {
+      return `${this.selectedAudienceUsername} selected. Choose Add to confirm.`;
+    }
+
+    if (query.length > 0 && query.length < 2) {
+      return "Type at least two characters to search for a member.";
+    }
+
+    if (this.audienceSuggestions.length > 0) {
+      const count = this.audienceSuggestions.length;
+      return `${count} ${count === 1 ? "suggestion" : "suggestions"} available. Use the arrow keys to review them and Enter to select.`;
+    }
+
+    if (query.length >= 2) {
+      return "No matching members found.";
+    }
+
+    return "";
+  }
+
   get pollIntervalMs() {
     const seconds = Number(this.config?.poll_interval_seconds || 3);
     return Math.max(1, Math.min(seconds, 60)) * 1000;
@@ -420,6 +489,15 @@ export default class LiveMetricsPage extends Component {
     return this.visibilityOptionDisabled(account, id) ? `${label} (disabled by site settings)` : label;
   }
 
+  audienceAddDisabled(provider, mode) {
+    return (
+      this.audienceUpdating ||
+      this.audienceProvider !== provider ||
+      this.audienceMode !== mode ||
+      this.audienceQuery.trim().length < 2
+    );
+  }
+
   @action
   setup() {
     this.readUrlNotice();
@@ -430,6 +508,7 @@ export default class LiveMetricsPage extends Component {
   @action
   cleanup() {
     this.refreshSequence += 1;
+    this.audienceSearchSequence += 1;
     this.stopPolling();
     this.stopClock();
     clearTimeout(this.audienceSearchTimer);
@@ -794,23 +873,27 @@ export default class LiveMetricsPage extends Component {
     this.audienceMode = mode;
     this.audienceQuery = query;
     this.selectedAudienceUsername = null;
+    this.audienceActiveIndex = -1;
+    this.audienceSuggestions = [];
+    this.audienceSearchSequence += 1;
+    const searchSequence = this.audienceSearchSequence;
     clearTimeout(this.audienceSearchTimer);
 
     if (query.trim().length < 2) {
-      this.audienceSuggestions = [];
       this.audienceSearching = false;
       return;
     }
 
     this.audienceSearching = true;
     this.audienceSearchTimer = setTimeout(
-      () => this.searchAudienceUsers(provider, mode, query),
+      () => this.searchAudienceUsers(provider, mode, query, searchSequence),
       250
     );
   }
 
-  async searchAudienceUsers(provider, mode, query) {
+  async searchAudienceUsers(provider, mode, query, searchSequence) {
     const isCurrentSearch = () =>
+      this.audienceSearchSequence === searchSequence &&
       this.audienceProvider === provider &&
       this.audienceMode === mode &&
       this.audienceQuery.trim() === query.trim();
@@ -820,7 +903,12 @@ export default class LiveMetricsPage extends Component {
         data: { q: query.trim(), mode },
       });
       if (isCurrentSearch()) {
-        this.audienceSuggestions = decorateAudienceUsers(response?.users);
+        this.audienceActiveIndex = -1;
+        this.audienceSuggestions = decorateAudienceSuggestions(
+          response?.users,
+          provider,
+          mode
+        );
       }
     } catch {
       if (isCurrentSearch()) {
@@ -837,7 +925,61 @@ export default class LiveMetricsPage extends Component {
   selectAudienceUser(user) {
     this.audienceQuery = user.username;
     this.selectedAudienceUsername = user.username;
+    this.audienceActiveIndex = -1;
     this.audienceSuggestions = [];
+  }
+
+  setAudienceActiveIndex(index) {
+    const lastIndex = this.audienceSuggestions.length - 1;
+    const normalized = Math.max(-1, Math.min(index, lastIndex));
+    this.audienceActiveIndex = normalized;
+    this.audienceSuggestions = this.audienceSuggestions.map((user, userIndex) => ({
+      ...user,
+      active: userIndex === normalized,
+    }));
+  }
+
+  @action
+  handleAudienceKeydown(provider, mode, event) {
+    if (this.audienceProvider !== provider || this.audienceMode !== mode) {
+      return;
+    }
+
+    const suggestions = this.audienceSuggestions;
+    const lastIndex = suggestions.length - 1;
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.audienceSearchSequence += 1;
+      clearTimeout(this.audienceSearchTimer);
+      this.audienceSearching = false;
+      this.audienceSuggestions = [];
+      this.audienceActiveIndex = -1;
+      return;
+    }
+
+    if (lastIndex < 0) {
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      const next = this.audienceActiveIndex >= lastIndex ? 0 : this.audienceActiveIndex + 1;
+      this.setAudienceActiveIndex(next);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      const previous = this.audienceActiveIndex <= 0 ? lastIndex : this.audienceActiveIndex - 1;
+      this.setAudienceActiveIndex(previous);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      this.setAudienceActiveIndex(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      this.setAudienceActiveIndex(lastIndex);
+    } else if (event.key === "Enter" && this.audienceActiveIndex >= 0) {
+      event.preventDefault();
+      this.selectAudienceUser(suggestions[this.audienceActiveIndex]);
+    }
   }
 
   @action
@@ -885,6 +1027,7 @@ export default class LiveMetricsPage extends Component {
   }
 
   resetAudienceSearch() {
+    this.audienceSearchSequence += 1;
     clearTimeout(this.audienceSearchTimer);
     this.audienceQuery = "";
     this.audienceSuggestions = [];
@@ -892,6 +1035,7 @@ export default class LiveMetricsPage extends Component {
     this.audienceProvider = null;
     this.audienceMode = null;
     this.selectedAudienceUsername = null;
+    this.audienceActiveIndex = -1;
   }
 
   async saveSettings(provider, changes) {
@@ -977,6 +1121,8 @@ export default class LiveMetricsPage extends Component {
         <div
           class="live-metrics-alert live-metrics-alert--success live-metrics-alert--dismissible"
           role="status"
+          aria-live="polite"
+          aria-atomic="true"
         >
           <span class="live-metrics-alert__message">{{this.notice}}</span>
           <button
@@ -995,6 +1141,8 @@ export default class LiveMetricsPage extends Component {
         <div
           class="live-metrics-alert live-metrics-alert--error live-metrics-alert--dismissible"
           role="alert"
+          aria-live="assertive"
+          aria-atomic="true"
         >
           <span class="live-metrics-alert__message">{{this.error}}</span>
           <button
@@ -1010,7 +1158,7 @@ export default class LiveMetricsPage extends Component {
       {{/if}}
 
       {{#if this.loading}}
-        <div class="live-metrics-card live-metrics-muted">Loading heartrate settings…</div>
+        <div class="live-metrics-card live-metrics-muted" role="status" aria-live="polite">Loading heartrate settings…</div>
       {{else}}
         {{#if this.directoryEnabled}}
           <section class="live-metrics-card live-metrics-directory">
@@ -1030,6 +1178,7 @@ export default class LiveMetricsPage extends Component {
                       href={{row.user.profile_url}}
                       data-user-card={{row.user.username}}
                       title={{row.user.username}}
+                      aria-label={{row.user.user_card_label}}
                       {{on "click" (fn this.handleDirectoryUserClick row)}}
                     >
                       <img class="live-metrics-avatar" src={{row.user.avatar_url}} alt="" />
@@ -1079,7 +1228,13 @@ export default class LiveMetricsPage extends Component {
               <h2>Manage my heartrate sharing</h2>
               <p>Connect providers, choose your active source, and decide whether your live heart rate appears in the overview or user cards.</p>
             </div>
-            <button type="button" class="btn btn-default live-metrics-manage-toggle" {{on "click" this.toggleSettings}}>
+            <button
+              type="button"
+              class="btn btn-default live-metrics-manage-toggle"
+              aria-expanded={{this.settingsOpen}}
+              aria-controls="live-metrics-settings-panel"
+              {{on "click" this.toggleSettings}}
+            >
               {{this.settingsToggleLabel}}
             </button>
           </div>
@@ -1091,7 +1246,7 @@ export default class LiveMetricsPage extends Component {
           {{/unless}}
 
           {{#if this.settingsOpen}}
-            <div class="live-metrics-grid live-metrics-grid--settings-open">
+            <div id="live-metrics-settings-panel" class="live-metrics-grid live-metrics-grid--settings-open">
               <article class="live-metrics-card live-metrics-card--settings live-metrics-card--nested">
                 <div class="live-metrics-card__header">
                   <div>
@@ -1152,8 +1307,18 @@ export default class LiveMetricsPage extends Component {
                               <form class="live-metrics-connect-form" {{on "submit" this.connectHyperate}}>
                                 <label class="live-metrics-field">
                                   <span>HypeRate device ID</span>
-                                  <input type="text" value={{this.hyperateDeviceId}} disabled={{provider.connect_disabled}} {{on "input" this.updateHyperateDeviceId}} placeholder="Paste device ID" />
-                                  <small class="live-metrics-field__help">Use the device/user ID provided by HypeRate. The site API key stays server-side.</small>
+                                  <input
+                                    type="text"
+                                    value={{this.hyperateDeviceId}}
+                                    disabled={{provider.connect_disabled}}
+                                    placeholder="Paste device ID"
+                                    autocomplete="off"
+                                    autocapitalize="none"
+                                    spellcheck="false"
+                                    aria-describedby="live-metrics-hyperate-device-help"
+                                    {{on "input" this.updateHyperateDeviceId}}
+                                  />
+                                  <small id="live-metrics-hyperate-device-help" class="live-metrics-field__help">Use the device/user ID provided by HypeRate. The site API key stays server-side.</small>
                                 </label>
                                 <button type="submit" class="btn btn-primary" disabled={{this.hyperateConnectDisabled}}>
                                   {{#if provider.connecting}}Connecting…{{else}}Connect HypeRate{{/if}}
@@ -1211,18 +1376,50 @@ export default class LiveMetricsPage extends Component {
                                 </label>
 
                                 {{#if provider.show_specific_users}}
-                                  <section class="live-metrics-audience-panel">
+                                  <section class="live-metrics-audience-panel" aria-busy={{this.audienceUpdating}}>
                                     <div>
                                       <strong>Specific users</strong>
                                       <p>Only the members added here can see your live heartrate on the overview and in popup user cards.</p>
                                     </div>
                                     <div class="live-metrics-audience-search">
                                       <div class="live-metrics-audience-search__input">
-                                        <input type="text" value={{this.audienceQuery}} placeholder="Search username" autocomplete="off" disabled={{this.audienceUpdating}} {{on "input" (fn this.updateAudienceQuery provider.provider "specific")}} />
+                                        <input
+                                          id={{provider.specific_input_id}}
+                                          type="text"
+                                          value={{this.audienceQuery}}
+                                          placeholder="Search username"
+                                          autocomplete="off"
+                                          autocapitalize="none"
+                                          spellcheck="false"
+                                          disabled={{this.audienceUpdating}}
+                                          role="combobox"
+                                          aria-label="Search for a member to allow"
+                                          aria-autocomplete="list"
+                                          aria-expanded={{provider.show_specific_suggestions}}
+                                          aria-controls={{provider.specific_listbox_id}}
+                                          aria-activedescendant={{provider.specific_active_descendant}}
+                                          {{on "input" (fn this.updateAudienceQuery provider.provider "specific")}}
+                                          {{on "keydown" (fn this.handleAudienceKeydown provider.provider "specific")}}
+                                        />
+                                        <span class="live-metrics-sr-only" role="status" aria-live="polite" aria-atomic="true">{{provider.specific_status_message}}</span>
                                         {{#if provider.show_specific_suggestions}}
-                                          <div class="live-metrics-audience-suggestions">
+                                          <div
+                                            id={{provider.specific_listbox_id}}
+                                            class="live-metrics-audience-suggestions"
+                                            role="listbox"
+                                            aria-label="Member suggestions"
+                                          >
                                             {{#each this.audienceSuggestions key="username" as |user|}}
-                                              <button type="button" {{on "click" (fn this.selectAudienceUser user)}}>
+                                              <button
+                                                type="button"
+                                                class={{if user.active "is-active"}}
+                                                role="option"
+                                                tabindex="-1"
+                                                id={{user.option_id}}
+                                                aria-selected={{user.active}}
+                                                aria-label={{user.select_label}}
+                                                {{on "click" (fn this.selectAudienceUser user)}}
+                                              >
                                                 <img class="live-metrics-audience-avatar" src={{user.avatar_url}} alt="" />
                                                 <span class="live-metrics-audience-identity">
                                                   <strong>{{user.username}}</strong>
@@ -1233,7 +1430,13 @@ export default class LiveMetricsPage extends Component {
                                           </div>
                                         {{/if}}
                                       </div>
-                                      <button type="button" class="btn btn-default" disabled={{this.audienceUpdating}} {{on "click" (fn this.addAudienceUser provider.provider "specific")}}>Add</button>
+                                      <button
+                                        type="button"
+                                        class="btn btn-default"
+                                        disabled={{provider.specific_add_disabled}}
+                                        aria-label="Add selected member to specific users"
+                                        {{on "click" (fn this.addAudienceUser provider.provider "specific")}}
+                                      >Add</button>
                                     </div>
                                     {{#if provider.specific_users.length}}
                                       <div class="live-metrics-audience-list">
@@ -1246,7 +1449,13 @@ export default class LiveMetricsPage extends Component {
                                                 {{#if user.name}}<small>{{user.name}}</small>{{/if}}
                                               </span>
                                             </div>
-                                            <button type="button" class="btn btn-flat" disabled={{this.audienceUpdating}} {{on "click" (fn this.removeAudienceUser provider.provider "specific" user)}}>Remove</button>
+                                            <button
+                                              type="button"
+                                              class="btn btn-flat"
+                                              disabled={{this.audienceUpdating}}
+                                              aria-label={{user.remove_specific_label}}
+                                              {{on "click" (fn this.removeAudienceUser provider.provider "specific" user)}}
+                                            >Remove</button>
                                           </div>
                                         {{/each}}
                                       </div>
@@ -1257,18 +1466,50 @@ export default class LiveMetricsPage extends Component {
                                 {{/if}}
 
                                 {{#if provider.show_blocked_users}}
-                                  <section class="live-metrics-audience-panel">
+                                  <section class="live-metrics-audience-panel" aria-busy={{this.audienceUpdating}}>
                                     <div>
                                       <strong>Blocked users</strong>
                                       <p>All members can see your live heartrate except the members added here.</p>
                                     </div>
                                     <div class="live-metrics-audience-search">
                                       <div class="live-metrics-audience-search__input">
-                                        <input type="text" value={{this.audienceQuery}} placeholder="Search username" autocomplete="off" disabled={{this.audienceUpdating}} {{on "input" (fn this.updateAudienceQuery provider.provider "blocked")}} />
+                                        <input
+                                          id={{provider.blocked_input_id}}
+                                          type="text"
+                                          value={{this.audienceQuery}}
+                                          placeholder="Search username"
+                                          autocomplete="off"
+                                          autocapitalize="none"
+                                          spellcheck="false"
+                                          disabled={{this.audienceUpdating}}
+                                          role="combobox"
+                                          aria-label="Search for a member to block"
+                                          aria-autocomplete="list"
+                                          aria-expanded={{provider.show_blocked_suggestions}}
+                                          aria-controls={{provider.blocked_listbox_id}}
+                                          aria-activedescendant={{provider.blocked_active_descendant}}
+                                          {{on "input" (fn this.updateAudienceQuery provider.provider "blocked")}}
+                                          {{on "keydown" (fn this.handleAudienceKeydown provider.provider "blocked")}}
+                                        />
+                                        <span class="live-metrics-sr-only" role="status" aria-live="polite" aria-atomic="true">{{provider.blocked_status_message}}</span>
                                         {{#if provider.show_blocked_suggestions}}
-                                          <div class="live-metrics-audience-suggestions">
+                                          <div
+                                            id={{provider.blocked_listbox_id}}
+                                            class="live-metrics-audience-suggestions"
+                                            role="listbox"
+                                            aria-label="Member suggestions"
+                                          >
                                             {{#each this.audienceSuggestions key="username" as |user|}}
-                                              <button type="button" {{on "click" (fn this.selectAudienceUser user)}}>
+                                              <button
+                                                type="button"
+                                                class={{if user.active "is-active"}}
+                                                role="option"
+                                                tabindex="-1"
+                                                id={{user.option_id}}
+                                                aria-selected={{user.active}}
+                                                aria-label={{user.select_label}}
+                                                {{on "click" (fn this.selectAudienceUser user)}}
+                                              >
                                                 <img class="live-metrics-audience-avatar" src={{user.avatar_url}} alt="" />
                                                 <span class="live-metrics-audience-identity">
                                                   <strong>{{user.username}}</strong>
@@ -1279,7 +1520,13 @@ export default class LiveMetricsPage extends Component {
                                           </div>
                                         {{/if}}
                                       </div>
-                                      <button type="button" class="btn btn-default" disabled={{this.audienceUpdating}} {{on "click" (fn this.addAudienceUser provider.provider "blocked")}}>Add</button>
+                                      <button
+                                        type="button"
+                                        class="btn btn-default"
+                                        disabled={{provider.blocked_add_disabled}}
+                                        aria-label="Add selected member to blocked users"
+                                        {{on "click" (fn this.addAudienceUser provider.provider "blocked")}}
+                                      >Add</button>
                                     </div>
                                     {{#if provider.blocked_users.length}}
                                       <div class="live-metrics-audience-list">
@@ -1292,7 +1539,13 @@ export default class LiveMetricsPage extends Component {
                                                 {{#if user.name}}<small>{{user.name}}</small>{{/if}}
                                               </span>
                                             </div>
-                                            <button type="button" class="btn btn-flat" disabled={{this.audienceUpdating}} {{on "click" (fn this.removeAudienceUser provider.provider "blocked" user)}}>Remove</button>
+                                            <button
+                                              type="button"
+                                              class="btn btn-flat"
+                                              disabled={{this.audienceUpdating}}
+                                              aria-label={{user.remove_blocked_label}}
+                                              {{on "click" (fn this.removeAudienceUser provider.provider "blocked" user)}}
+                                            >Remove</button>
                                           </div>
                                         {{/each}}
                                       </div>
