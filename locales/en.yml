@@ -3,3 +3,11 @@ en:
     description: "Heartrate sharing"
   live_metrics:
     title: "Heartrate"
+    owner_status:
+      subscription_required: "Pulsoid subscription required. Check your Pulsoid plan."
+      scope_required: "Pulsoid permission is incomplete. Reconnect your account."
+      reconnect_required: "Pulsoid authorization expired. Reconnect your account."
+      unauthorized: "Pulsoid authorization expired. Reconnect your account."
+      reconnecting: "Pulsoid is reconnecting."
+      no_data: "No heart-rate signal from Pulsoid."
+      provider_unavailable: "Pulsoid is temporarily unavailable."

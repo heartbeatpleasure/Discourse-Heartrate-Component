@@ -19,6 +19,15 @@ const DEFAULT_VISIBILITY_OPTIONS = [
   { id: "public", label: "Public" },
   { id: "staff", label: "Staff only" },
 ];
+const OWNER_STATUS_CODES = new Set([
+  "subscription_required",
+  "scope_required",
+  "reconnect_required",
+  "unauthorized",
+  "reconnecting",
+  "no_data",
+  "provider_unavailable",
+]);
 
 function publishDirectoryCount(rows) {
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
@@ -140,6 +149,10 @@ function decorateSettingsAccount(account) {
   }
 
   const visibility = account.visibility || "private";
+  const ownerStatusCode = String(account.owner_status?.code || "");
+  const ownerStatusMessage = OWNER_STATUS_CODES.has(ownerStatusCode)
+    ? I18n.t(`live_metrics.owner_status.${ownerStatusCode}`)
+    : account.owner_status?.message;
 
   return {
     ...account,
@@ -150,7 +163,7 @@ function decorateSettingsAccount(account) {
     visibility_logged_in: visibility === "logged_in",
     visibility_public: visibility === "public",
     visibility_staff: visibility === "staff",
-    live_error: account.live?.error,
+    live_error: ownerStatusMessage || account.live?.error,
   };
 }
 
@@ -621,6 +634,12 @@ export default class LiveMetricsPage extends Component {
         return "Pulsoid could not be connected because the OAuth session expired. Please try again.";
       case "missing_authorization_code":
         return "Pulsoid did not return an authorization code. Please try again.";
+      case "pulsoid_scope_required":
+        return "Pulsoid did not grant the required heart-rate permission. Please reconnect and approve the requested permission.";
+      case "pulsoid_client_mismatch":
+        return "Pulsoid returned credentials for another OAuth application. Please contact staff.";
+      case "pulsoid_token_validation_failed":
+        return "Pulsoid could not verify the new authorization. Please try again shortly.";
       case "pulsoid_connect_failed":
         return "Pulsoid could not be connected. Please try again or contact staff.";
       case "database_not_ready":
