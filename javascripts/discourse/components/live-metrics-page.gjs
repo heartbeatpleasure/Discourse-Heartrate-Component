@@ -29,6 +29,14 @@ const OWNER_STATUS_CODES = new Set([
   "provider_unavailable",
 ]);
 
+function providerName(provider) {
+  if (PROVIDER_ORDER.includes(provider)) {
+    return I18n.t(`live_metrics.providers.${provider}`);
+  }
+
+  return String(provider || "");
+}
+
 function publishDirectoryCount(rows) {
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
     return;
@@ -213,26 +221,30 @@ function liveAgeSeconds(live, nowMs) {
 
 function freshnessLabel(status, age, provider) {
   if (status === "live") {
-    return "Live now";
+    return I18n.t("live_metrics.freshness.live");
   }
 
   if (status === "delayed" && age !== null) {
-    return `Last signal ${formatAge(age)} ago`;
+    return I18n.t("live_metrics.freshness.delayed", { age: formatAge(age) });
   }
 
   if (status === "stale") {
-    return "No recent signal";
+    return I18n.t("live_metrics.freshness.stale");
   }
 
   if (status === "no_data") {
-    return "No heart-rate data yet";
+    return I18n.t("live_metrics.freshness.no_data");
   }
 
   if (status === "unauthorized") {
-    return provider === "hyperate" ? "Connection rejected" : "Reconnect required";
+    return I18n.t(
+      provider === "hyperate"
+        ? "live_metrics.freshness.hyperate_unauthorized"
+        : "live_metrics.freshness.pulsoid_unauthorized"
+    );
   }
 
-  return "Unavailable";
+  return I18n.t("live_metrics.freshness.unavailable");
 }
 
 function formatAge(seconds) {
@@ -300,6 +312,37 @@ export default class LiveMetricsPage extends Component {
     return I18n.t("live_metrics.title");
   }
 
+  get heroDescription() {
+    return I18n.t("live_metrics.hero_description");
+  }
+
+  get providersDisabledHelp() {
+    return I18n.t("live_metrics.connections.providers_disabled_help");
+  }
+
+  get connectionText() {
+    return {
+      connected_active: I18n.t("live_metrics.connections.connected_active"),
+      connected: I18n.t("live_metrics.connections.connected"),
+      available: I18n.t("live_metrics.connections.available"),
+      not_configured: I18n.t("live_metrics.connections.not_configured"),
+      disconnecting: I18n.t("live_metrics.connections.disconnecting"),
+      disconnect: I18n.t("live_metrics.connections.disconnect"),
+      connect_pulsoid: I18n.t("live_metrics.connections.connect_pulsoid"),
+      hyperate_device_id: I18n.t(
+        "live_metrics.connections.hyperate_device_id"
+      ),
+      hyperate_device_placeholder: I18n.t(
+        "live_metrics.connections.hyperate_device_placeholder"
+      ),
+      hyperate_device_help: I18n.t(
+        "live_metrics.connections.hyperate_device_help"
+      ),
+      connecting: I18n.t("live_metrics.connections.connecting"),
+      connect_hyperate: I18n.t("live_metrics.connections.connect_hyperate"),
+    };
+  }
+
   get rawAccounts() {
     return this.me?.accounts || (this.me?.account ? [this.me.account] : []);
   }
@@ -331,6 +374,7 @@ export default class LiveMetricsPage extends Component {
       const account = this.settingsAccounts.find((item) => item.provider === provider) || null;
       const isPulsoid = provider === "pulsoid";
       const isHyperate = provider === "hyperate";
+      const label = config.label || account?.provider_label || providerName(provider);
       const connecting = isHyperate ? this.connectingHyperate : false;
       const disconnecting = this.disconnectingProvider === provider;
       const activating = this.activatingProvider === provider;
@@ -338,7 +382,11 @@ export default class LiveMetricsPage extends Component {
 
       return {
         provider,
-        label: config.label || account?.provider_label || provider,
+        label,
+        configuration_missing_message: I18n.t(
+          "live_metrics.connections.configuration_missing",
+          { provider: label }
+        ),
         configured: config.configured === true,
         account,
         connected: Boolean(account?.connected),
@@ -436,7 +484,11 @@ export default class LiveMetricsPage extends Component {
   }
 
   get settingsToggleLabel() {
-    return this.settingsOpen ? "Hide connection settings" : "Manage my connections";
+    return I18n.t(
+      this.settingsOpen
+        ? "live_metrics.connections.hide_settings"
+        : "live_metrics.connections.manage_connections"
+    );
   }
 
   audienceSearchActive(provider, mode) {
@@ -605,7 +657,7 @@ export default class LiveMetricsPage extends Component {
       const error = params.get("error");
 
       if (connected === "pulsoid") {
-        const message = "Pulsoid connected and selected as your active provider.";
+        const message = I18n.t("live_metrics.notices.pulsoid_connected");
         this.notice = message;
         this.scheduleNoticeDismiss(message);
       }
@@ -629,31 +681,31 @@ export default class LiveMetricsPage extends Component {
   errorMessage(errorKey) {
     switch (errorKey) {
       case "pulsoid_not_configured":
-        return "Pulsoid is not configured yet. An administrator must add the OAuth client ID and secret first.";
+        return I18n.t("live_metrics.errors.pulsoid_not_configured");
       case "oauth_state_mismatch":
-        return "Pulsoid could not be connected because the OAuth session expired. Please try again.";
+        return I18n.t("live_metrics.errors.oauth_state_mismatch");
       case "missing_authorization_code":
-        return "Pulsoid did not return an authorization code. Please try again.";
+        return I18n.t("live_metrics.errors.missing_authorization_code");
       case "pulsoid_scope_required":
-        return "Pulsoid did not grant the required heart-rate permission. Please reconnect and approve the requested permission.";
+        return I18n.t("live_metrics.errors.pulsoid_scope_required");
       case "pulsoid_client_mismatch":
-        return "Pulsoid returned credentials for another OAuth application. Please contact staff.";
+        return I18n.t("live_metrics.errors.pulsoid_client_mismatch");
       case "pulsoid_token_validation_failed":
-        return "Pulsoid could not verify the new authorization. Please try again shortly.";
+        return I18n.t("live_metrics.errors.pulsoid_token_validation_failed");
       case "pulsoid_connect_failed":
-        return "Pulsoid could not be connected. Please try again or contact staff.";
+        return I18n.t("live_metrics.errors.pulsoid_connect_failed");
       case "database_not_ready":
-        return "Heartrate is still being prepared after an update. Please try again shortly or contact staff.";
+        return I18n.t("live_metrics.errors.database_not_ready");
       case "sharing_not_allowed":
-        return "Your account is not allowed to connect or share heartrate data.";
+        return I18n.t("live_metrics.errors.sharing_not_allowed");
       case "access_denied":
       case "authorization_cancelled":
       case "authorization_canceled":
       case "cancelled":
       case "canceled":
-        return "Connecting to Pulsoid was cancelled.";
+        return I18n.t("live_metrics.errors.pulsoid_cancelled");
       default:
-        return "Connecting to Pulsoid could not be completed. Please try again.";
+        return I18n.t("live_metrics.errors.pulsoid_unknown");
     }
   }
 
@@ -675,7 +727,7 @@ export default class LiveMetricsPage extends Component {
       this.startPolling();
       this.refreshLiveSections();
     } catch {
-      this.error = "Heartrate settings could not be loaded. Please refresh the page or contact staff.";
+      this.error = I18n.t("live_metrics.errors.settings_load_failed");
       this.loading = false;
     }
   }
@@ -769,7 +821,7 @@ export default class LiveMetricsPage extends Component {
     event?.preventDefault?.();
 
     if (!this.canShare) {
-      this.error = "Your account is not allowed to connect or share heartrate data.";
+      this.error = I18n.t("live_metrics.errors.sharing_not_allowed");
       return;
     }
 
@@ -789,7 +841,7 @@ export default class LiveMetricsPage extends Component {
 
     const deviceId = this.hyperateDeviceId.trim();
     if (!this.canShare) {
-      this.error = "Your account is not allowed to connect or share heartrate data.";
+      this.error = I18n.t("live_metrics.errors.sharing_not_allowed");
       return;
     }
 
@@ -806,10 +858,12 @@ export default class LiveMetricsPage extends Component {
         data: { device_id: deviceId },
       });
       this.hyperateDeviceId = "";
-      this.notice = "HypeRate connected and selected as your active provider.";
+      this.notice = I18n.t("live_metrics.notices.hyperate_connected");
       this.refreshLiveSections();
     } catch (error) {
-      this.error = error?.jqXHR?.responseJSON?.message || "HypeRate could not be connected. Check the device ID and try again.";
+      this.error =
+        error?.jqXHR?.responseJSON?.message ||
+        I18n.t("live_metrics.errors.hyperate_connect_failed");
     } finally {
       this.connectingHyperate = false;
     }
@@ -824,16 +878,20 @@ export default class LiveMetricsPage extends Component {
     this.disconnectingProvider = provider;
     this.error = null;
 
-    const label = provider === "hyperate" ? "HypeRate" : "Pulsoid";
+    const label = providerName(provider);
     const url = provider === "hyperate" ? "/live-metrics/api/connect/hyperate" : "/live-metrics/auth/pulsoid";
 
     try {
       await ajax(url, { type: "DELETE" });
-      this.notice = `${label} disconnected.`;
+      this.notice = I18n.t("live_metrics.notices.provider_disconnected", {
+        provider: label,
+      });
       await this.loadSettings();
       await this.refreshLiveSections();
     } catch {
-      this.error = `${label} could not be disconnected. Please try again.`;
+      this.error = I18n.t("live_metrics.errors.provider_disconnect_failed", {
+        provider: label,
+      });
     } finally {
       this.disconnectingProvider = null;
     }
@@ -842,7 +900,7 @@ export default class LiveMetricsPage extends Component {
   @action
   async activateProvider(provider) {
     if (!this.canShare) {
-      this.error = "Your account is not allowed to connect or share heartrate data.";
+      this.error = I18n.t("live_metrics.errors.sharing_not_allowed");
       return;
     }
 
@@ -857,12 +915,16 @@ export default class LiveMetricsPage extends Component {
       this.me = await ajax(`/live-metrics/api/accounts/${provider}/activate`, {
         type: "PUT",
       });
-      const label = provider === "hyperate" ? "HypeRate" : "Pulsoid";
-      this.notice = `${label} is now your active provider.`;
+      const label = providerName(provider);
+      this.notice = I18n.t("live_metrics.notices.provider_activated", {
+        provider: label,
+      });
       this.liveAccount = null;
       this.refreshLiveSections();
     } catch (error) {
-      this.error = error?.jqXHR?.responseJSON?.message || "Your active provider could not be changed.";
+      this.error =
+        error?.jqXHR?.responseJSON?.message ||
+        I18n.t("live_metrics.errors.provider_activation_failed");
       await this.loadSettings();
     } finally {
       this.activatingProvider = null;
@@ -1060,7 +1122,7 @@ export default class LiveMetricsPage extends Component {
   async saveSettings(provider, changes) {
     const account = this.settingsAccounts.find((item) => item.provider === provider);
     if (!this.canShare) {
-      this.error = "Your account is not allowed to connect or share heartrate data.";
+      this.error = I18n.t("live_metrics.errors.sharing_not_allowed");
       return;
     }
 
@@ -1114,9 +1176,7 @@ export default class LiveMetricsPage extends Component {
       <section class="live-metrics-hero">
         <div class="live-metrics-hero__copy">
           <h1>{{this.title}}</h1>
-          <p>
-            Connect Pulsoid or HypeRate to share your live heart-rate reading with other members. Your current reading is only shown while your active provider has a recent signal, and your heart-rate history is not stored.
-          </p>
+          <p>{{this.heroDescription}}</p>
         </div>
 
         <div class="live-metrics-hero__status">
@@ -1289,27 +1349,27 @@ export default class LiveMetricsPage extends Component {
                             <div>
                               <strong>{{provider.label}}</strong>
                               {{#if provider.connected}}
-                                <p>{{if provider.active "Connected · active" "Connected"}}</p>
+                                <p>{{if provider.active this.connectionText.connected_active this.connectionText.connected}}</p>
                                 {{#if provider.account.live_error}}
                                   <small class="live-metrics-provider-error">{{provider.account.live_error}}</small>
                                 {{/if}}
                               {{else}}
                                 {{#if provider.configured}}
-                                  <p>Available</p>
+                                  <p>{{this.connectionText.available}}</p>
                                 {{else}}
-                                  <p>Not configured yet</p>
+                                  <p>{{this.connectionText.not_configured}}</p>
                                 {{/if}}
                               {{/if}}
                             </div>
 
                             {{#if provider.connected}}
                               <button type="button" class="btn btn-danger" disabled={{provider.disconnecting}} {{on "click" (fn this.disconnectProvider provider.provider)}}>
-                                {{#if provider.disconnecting}}Disconnecting…{{else}}Disconnect{{/if}}
+                                {{#if provider.disconnecting}}{{this.connectionText.disconnecting}}{{else}}{{this.connectionText.disconnect}}{{/if}}
                               </button>
                             {{else}}
                               {{#if provider.isPulsoid}}
                                 <button type="button" class="btn btn-primary" disabled={{provider.connect_disabled}} {{on "click" this.connectPulsoid}}>
-                                  Connect your Pulsoid account
+                                  {{this.connectionText.connect_pulsoid}}
                                 </button>
                               {{/if}}
                             {{/if}}
@@ -1317,7 +1377,7 @@ export default class LiveMetricsPage extends Component {
 
                           {{#unless provider.configured}}
                             <div class="live-metrics-inline-warning live-metrics-inline-warning--compact">
-                              {{provider.label}} is enabled, but the required server-side settings are not configured yet.
+                              {{provider.configuration_missing_message}}
                             </div>
                           {{/unless}}
 
@@ -1325,22 +1385,22 @@ export default class LiveMetricsPage extends Component {
                             {{#unless provider.connected}}
                               <form class="live-metrics-connect-form" {{on "submit" this.connectHyperate}}>
                                 <label class="live-metrics-field">
-                                  <span>HypeRate device ID</span>
+                                  <span>{{this.connectionText.hyperate_device_id}}</span>
                                   <input
                                     type="text"
                                     value={{this.hyperateDeviceId}}
                                     disabled={{provider.connect_disabled}}
-                                    placeholder="Paste device ID"
+                                    placeholder={{this.connectionText.hyperate_device_placeholder}}
                                     autocomplete="off"
                                     autocapitalize="none"
                                     spellcheck="false"
                                     aria-describedby="live-metrics-hyperate-device-help"
                                     {{on "input" this.updateHyperateDeviceId}}
                                   />
-                                  <small id="live-metrics-hyperate-device-help" class="live-metrics-field__help">Use the device/user ID provided by HypeRate. The site API key stays server-side.</small>
+                                  <small id="live-metrics-hyperate-device-help" class="live-metrics-field__help">{{this.connectionText.hyperate_device_help}}</small>
                                 </label>
                                 <button type="submit" class="btn btn-primary" disabled={{this.hyperateConnectDisabled}}>
-                                  {{#if provider.connecting}}Connecting…{{else}}Connect HypeRate{{/if}}
+                                  {{#if provider.connecting}}{{this.connectionText.connecting}}{{else}}{{this.connectionText.connect_hyperate}}{{/if}}
                                 </button>
                               </form>
                             {{/unless}}
@@ -1584,7 +1644,7 @@ export default class LiveMetricsPage extends Component {
                   {{else}}
                     <div class="live-metrics-empty-state">
                       <h3>No providers enabled yet</h3>
-                      <p>An administrator can enable Pulsoid, HypeRate, or both in the Heartrate plugin settings.</p>
+                      <p>{{this.providersDisabledHelp}}</p>
                     </div>
                   {{/if}}
                 {{/if}}
