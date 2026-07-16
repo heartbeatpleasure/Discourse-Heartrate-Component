@@ -1,5 +1,10 @@
 import { apiInitializer } from "discourse/lib/api";
-import I18n from "I18n";
+import { i18n } from "discourse-i18n";
+import { themePrefix } from "virtual:theme";
+
+function themeI18n(key, options) {
+  return i18n(themePrefix(key), options);
+}
 
 function themeSetting(key, fallback = null) {
   if (typeof settings !== "undefined" && Object.prototype.hasOwnProperty.call(settings, key)) {
@@ -37,7 +42,7 @@ export default apiInitializer("1.0", (api) => {
   }
 
   const customText = stringSetting(themeSetting("nav_item_text", ""));
-  const label = customText.length ? customText : I18n.t("live_metrics.title");
+  const label = customText.length ? customText : themeI18n("live_metrics.title");
 
   api.addNavigationBarItem({
     name: "live-metrics",

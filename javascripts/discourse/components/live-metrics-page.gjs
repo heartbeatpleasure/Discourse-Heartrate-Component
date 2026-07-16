@@ -6,7 +6,8 @@ import { on } from "@ember/modifier";
 import { fn } from "@ember/helper";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
 import { ajax } from "discourse/lib/ajax";
-import I18n from "I18n";
+import { i18n } from "discourse-i18n";
+import { themePrefix } from "virtual:theme";
 
 const PROVIDER_ORDER = ["pulsoid", "hyperate"];
 const URL_ERROR_DISMISS_MS = 20_000;
@@ -29,9 +30,13 @@ const OWNER_STATUS_CODES = new Set([
   "provider_unavailable",
 ]);
 
+function themeI18n(key, options) {
+  return i18n(themePrefix(key), options);
+}
+
 function providerName(provider) {
   if (PROVIDER_ORDER.includes(provider)) {
-    return I18n.t(`live_metrics.providers.${provider}`);
+    return themeI18n(`live_metrics.providers.${provider}`);
   }
 
   return String(provider || "");
@@ -159,7 +164,7 @@ function decorateSettingsAccount(account) {
   const visibility = account.visibility || "private";
   const ownerStatusCode = String(account.owner_status?.code || "");
   const ownerStatusMessage = OWNER_STATUS_CODES.has(ownerStatusCode)
-    ? I18n.t(`live_metrics.owner_status.${ownerStatusCode}`)
+    ? themeI18n(`live_metrics.owner_status.${ownerStatusCode}`)
     : account.owner_status?.message;
 
   return {
@@ -221,30 +226,30 @@ function liveAgeSeconds(live, nowMs) {
 
 function freshnessLabel(status, age, provider) {
   if (status === "live") {
-    return I18n.t("live_metrics.freshness.live");
+    return themeI18n("live_metrics.freshness.live");
   }
 
   if (status === "delayed" && age !== null) {
-    return I18n.t("live_metrics.freshness.delayed", { age: formatAge(age) });
+    return themeI18n("live_metrics.freshness.delayed", { age: formatAge(age) });
   }
 
   if (status === "stale") {
-    return I18n.t("live_metrics.freshness.stale");
+    return themeI18n("live_metrics.freshness.stale");
   }
 
   if (status === "no_data") {
-    return I18n.t("live_metrics.freshness.no_data");
+    return themeI18n("live_metrics.freshness.no_data");
   }
 
   if (status === "unauthorized") {
-    return I18n.t(
+    return themeI18n(
       provider === "hyperate"
         ? "live_metrics.freshness.hyperate_unauthorized"
         : "live_metrics.freshness.pulsoid_unauthorized"
     );
   }
 
-  return I18n.t("live_metrics.freshness.unavailable");
+  return themeI18n("live_metrics.freshness.unavailable");
 }
 
 function formatAge(seconds) {
@@ -309,37 +314,37 @@ export default class LiveMetricsPage extends Component {
   }
 
   get title() {
-    return I18n.t("live_metrics.title");
+    return themeI18n("live_metrics.title");
   }
 
   get heroDescription() {
-    return I18n.t("live_metrics.hero_description");
+    return themeI18n("live_metrics.hero_description");
   }
 
   get providersDisabledHelp() {
-    return I18n.t("live_metrics.connections.providers_disabled_help");
+    return themeI18n("live_metrics.connections.providers_disabled_help");
   }
 
   get connectionText() {
     return {
-      connected_active: I18n.t("live_metrics.connections.connected_active"),
-      connected: I18n.t("live_metrics.connections.connected"),
-      available: I18n.t("live_metrics.connections.available"),
-      not_configured: I18n.t("live_metrics.connections.not_configured"),
-      disconnecting: I18n.t("live_metrics.connections.disconnecting"),
-      disconnect: I18n.t("live_metrics.connections.disconnect"),
-      connect_pulsoid: I18n.t("live_metrics.connections.connect_pulsoid"),
-      hyperate_device_id: I18n.t(
+      connected_active: themeI18n("live_metrics.connections.connected_active"),
+      connected: themeI18n("live_metrics.connections.connected"),
+      available: themeI18n("live_metrics.connections.available"),
+      not_configured: themeI18n("live_metrics.connections.not_configured"),
+      disconnecting: themeI18n("live_metrics.connections.disconnecting"),
+      disconnect: themeI18n("live_metrics.connections.disconnect"),
+      connect_pulsoid: themeI18n("live_metrics.connections.connect_pulsoid"),
+      hyperate_device_id: themeI18n(
         "live_metrics.connections.hyperate_device_id"
       ),
-      hyperate_device_placeholder: I18n.t(
+      hyperate_device_placeholder: themeI18n(
         "live_metrics.connections.hyperate_device_placeholder"
       ),
-      hyperate_device_help: I18n.t(
+      hyperate_device_help: themeI18n(
         "live_metrics.connections.hyperate_device_help"
       ),
-      connecting: I18n.t("live_metrics.connections.connecting"),
-      connect_hyperate: I18n.t("live_metrics.connections.connect_hyperate"),
+      connecting: themeI18n("live_metrics.connections.connecting"),
+      connect_hyperate: themeI18n("live_metrics.connections.connect_hyperate"),
     };
   }
 
@@ -383,7 +388,7 @@ export default class LiveMetricsPage extends Component {
       return {
         provider,
         label,
-        configuration_missing_message: I18n.t(
+        configuration_missing_message: themeI18n(
           "live_metrics.connections.configuration_missing",
           { provider: label }
         ),
@@ -484,7 +489,7 @@ export default class LiveMetricsPage extends Component {
   }
 
   get settingsToggleLabel() {
-    return I18n.t(
+    return themeI18n(
       this.settingsOpen
         ? "live_metrics.connections.hide_settings"
         : "live_metrics.connections.manage_connections"
@@ -657,7 +662,7 @@ export default class LiveMetricsPage extends Component {
       const error = params.get("error");
 
       if (connected === "pulsoid") {
-        const message = I18n.t("live_metrics.notices.pulsoid_connected");
+        const message = themeI18n("live_metrics.notices.pulsoid_connected");
         this.notice = message;
         this.scheduleNoticeDismiss(message);
       }
@@ -681,31 +686,31 @@ export default class LiveMetricsPage extends Component {
   errorMessage(errorKey) {
     switch (errorKey) {
       case "pulsoid_not_configured":
-        return I18n.t("live_metrics.errors.pulsoid_not_configured");
+        return themeI18n("live_metrics.errors.pulsoid_not_configured");
       case "oauth_state_mismatch":
-        return I18n.t("live_metrics.errors.oauth_state_mismatch");
+        return themeI18n("live_metrics.errors.oauth_state_mismatch");
       case "missing_authorization_code":
-        return I18n.t("live_metrics.errors.missing_authorization_code");
+        return themeI18n("live_metrics.errors.missing_authorization_code");
       case "pulsoid_scope_required":
-        return I18n.t("live_metrics.errors.pulsoid_scope_required");
+        return themeI18n("live_metrics.errors.pulsoid_scope_required");
       case "pulsoid_client_mismatch":
-        return I18n.t("live_metrics.errors.pulsoid_client_mismatch");
+        return themeI18n("live_metrics.errors.pulsoid_client_mismatch");
       case "pulsoid_token_validation_failed":
-        return I18n.t("live_metrics.errors.pulsoid_token_validation_failed");
+        return themeI18n("live_metrics.errors.pulsoid_token_validation_failed");
       case "pulsoid_connect_failed":
-        return I18n.t("live_metrics.errors.pulsoid_connect_failed");
+        return themeI18n("live_metrics.errors.pulsoid_connect_failed");
       case "database_not_ready":
-        return I18n.t("live_metrics.errors.database_not_ready");
+        return themeI18n("live_metrics.errors.database_not_ready");
       case "sharing_not_allowed":
-        return I18n.t("live_metrics.errors.sharing_not_allowed");
+        return themeI18n("live_metrics.errors.sharing_not_allowed");
       case "access_denied":
       case "authorization_cancelled":
       case "authorization_canceled":
       case "cancelled":
       case "canceled":
-        return I18n.t("live_metrics.errors.pulsoid_cancelled");
+        return themeI18n("live_metrics.errors.pulsoid_cancelled");
       default:
-        return I18n.t("live_metrics.errors.pulsoid_unknown");
+        return themeI18n("live_metrics.errors.pulsoid_unknown");
     }
   }
 
@@ -727,7 +732,7 @@ export default class LiveMetricsPage extends Component {
       this.startPolling();
       this.refreshLiveSections();
     } catch {
-      this.error = I18n.t("live_metrics.errors.settings_load_failed");
+      this.error = themeI18n("live_metrics.errors.settings_load_failed");
       this.loading = false;
     }
   }
@@ -821,7 +826,7 @@ export default class LiveMetricsPage extends Component {
     event?.preventDefault?.();
 
     if (!this.canShare) {
-      this.error = I18n.t("live_metrics.errors.sharing_not_allowed");
+      this.error = themeI18n("live_metrics.errors.sharing_not_allowed");
       return;
     }
 
@@ -841,7 +846,7 @@ export default class LiveMetricsPage extends Component {
 
     const deviceId = this.hyperateDeviceId.trim();
     if (!this.canShare) {
-      this.error = I18n.t("live_metrics.errors.sharing_not_allowed");
+      this.error = themeI18n("live_metrics.errors.sharing_not_allowed");
       return;
     }
 
@@ -858,12 +863,12 @@ export default class LiveMetricsPage extends Component {
         data: { device_id: deviceId },
       });
       this.hyperateDeviceId = "";
-      this.notice = I18n.t("live_metrics.notices.hyperate_connected");
+      this.notice = themeI18n("live_metrics.notices.hyperate_connected");
       this.refreshLiveSections();
     } catch (error) {
       this.error =
         error?.jqXHR?.responseJSON?.message ||
-        I18n.t("live_metrics.errors.hyperate_connect_failed");
+        themeI18n("live_metrics.errors.hyperate_connect_failed");
     } finally {
       this.connectingHyperate = false;
     }
@@ -883,13 +888,13 @@ export default class LiveMetricsPage extends Component {
 
     try {
       await ajax(url, { type: "DELETE" });
-      this.notice = I18n.t("live_metrics.notices.provider_disconnected", {
+      this.notice = themeI18n("live_metrics.notices.provider_disconnected", {
         provider: label,
       });
       await this.loadSettings();
       await this.refreshLiveSections();
     } catch {
-      this.error = I18n.t("live_metrics.errors.provider_disconnect_failed", {
+      this.error = themeI18n("live_metrics.errors.provider_disconnect_failed", {
         provider: label,
       });
     } finally {
@@ -900,7 +905,7 @@ export default class LiveMetricsPage extends Component {
   @action
   async activateProvider(provider) {
     if (!this.canShare) {
-      this.error = I18n.t("live_metrics.errors.sharing_not_allowed");
+      this.error = themeI18n("live_metrics.errors.sharing_not_allowed");
       return;
     }
 
@@ -916,7 +921,7 @@ export default class LiveMetricsPage extends Component {
         type: "PUT",
       });
       const label = providerName(provider);
-      this.notice = I18n.t("live_metrics.notices.provider_activated", {
+      this.notice = themeI18n("live_metrics.notices.provider_activated", {
         provider: label,
       });
       this.liveAccount = null;
@@ -924,7 +929,7 @@ export default class LiveMetricsPage extends Component {
     } catch (error) {
       this.error =
         error?.jqXHR?.responseJSON?.message ||
-        I18n.t("live_metrics.errors.provider_activation_failed");
+        themeI18n("live_metrics.errors.provider_activation_failed");
       await this.loadSettings();
     } finally {
       this.activatingProvider = null;
@@ -1122,7 +1127,7 @@ export default class LiveMetricsPage extends Component {
   async saveSettings(provider, changes) {
     const account = this.settingsAccounts.find((item) => item.provider === provider);
     if (!this.canShare) {
-      this.error = I18n.t("live_metrics.errors.sharing_not_allowed");
+      this.error = themeI18n("live_metrics.errors.sharing_not_allowed");
       return;
     }
 
