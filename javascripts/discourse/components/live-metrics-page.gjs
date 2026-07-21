@@ -281,6 +281,7 @@ export default class LiveMetricsPage extends Component {
   @tracked refreshing = false;
   @tracked savingProvider = null;
   @tracked disconnectingProvider = null;
+  @tracked reconnectingProvider = null;
   @tracked connectingHyperate = false;
   @tracked activatingProvider = null;
   @tracked error = null;
@@ -333,6 +334,8 @@ export default class LiveMetricsPage extends Component {
       not_configured: themeI18n("live_metrics.connections.not_configured"),
       disconnecting: themeI18n("live_metrics.connections.disconnecting"),
       disconnect: themeI18n("live_metrics.connections.disconnect"),
+      reconnecting: themeI18n("live_metrics.connections.reconnecting"),
+      reconnect: themeI18n("live_metrics.connections.reconnect"),
       connect_pulsoid: themeI18n("live_metrics.connections.connect_pulsoid"),
       hyperate_device_id: themeI18n(
         "live_metrics.connections.hyperate_device_id"
@@ -345,6 +348,12 @@ export default class LiveMetricsPage extends Component {
       ),
       connecting: themeI18n("live_metrics.connections.connecting"),
       connect_hyperate: themeI18n("live_metrics.connections.connect_hyperate"),
+      hyperate_reconnect_help: themeI18n(
+        "live_metrics.connections.hyperate_reconnect_help"
+      ),
+      pulsoid_reconnect_help: themeI18n(
+        "live_metrics.connections.pulsoid_reconnect_help"
+      ),
     };
   }
 
@@ -382,8 +391,28 @@ export default class LiveMetricsPage extends Component {
       const label = config.label || account?.provider_label || providerName(provider);
       const connecting = isHyperate ? this.connectingHyperate : false;
       const disconnecting = this.disconnectingProvider === provider;
+      const reconnecting = this.reconnectingProvider === provider;
       const activating = this.activatingProvider === provider;
       const saving = this.savingProvider === provider;
+      const pulsoidReconnectBlocked =
+        isPulsoid &&
+        [
+          "subscription_required",
+          "scope_required",
+          "reconnect_required",
+          "unauthorized",
+        ].includes(String(account?.owner_status?.code || ""));
+      const canReconnect =
+        Boolean(account?.connected) &&
+        account?.active === true &&
+        config.configured === true &&
+        config.reconnect_supported === true &&
+        !pulsoidReconnectBlocked;
+      const currentLive = account?.active === true ? this.account?.live : null;
+      const hasCurrentHeartRate =
+        this.account?.provider === provider &&
+        currentLive?.status === "live" &&
+        Number(currentLive?.heart_rate) > 0;
 
       return {
         provider,
@@ -401,10 +430,24 @@ export default class LiveMetricsPage extends Component {
         connect_url: config.connect_url,
         connect_disabled: !config.configured || connecting || this.databaseNotReady || !this.canShare,
         disconnecting,
+        reconnecting,
         connecting,
         activating,
         provider_saving: saving,
-        activate_disabled: activating || !this.canShare,
+        activate_disabled: activating || reconnecting || !this.canShare,
+        disconnect_disabled: disconnecting || reconnecting,
+        can_reconnect: canReconnect,
+        show_reconnect_help: canReconnect && !hasCurrentHeartRate,
+        reconnect_disabled:
+          reconnecting ||
+          disconnecting ||
+          activating ||
+          saving ||
+          !this.canShare ||
+          this.databaseNotReady,
+        reconnect_help: isHyperate
+          ? this.connectionText.hyperate_reconnect_help
+          : this.connectionText.pulsoid_reconnect_help,
         visibility_show_private: this.showVisibilityOption(account, "private"),
         visibility_show_specific_users: this.showVisibilityOption(account, "specific_users"),
         visibility_show_logged_in: this.showVisibilityOption(account, "logged_in"),
@@ -871,6 +914,43 @@ export default class LiveMetricsPage extends Component {
         themeI18n("live_metrics.errors.hyperate_connect_failed");
     } finally {
       this.connectingHyperate = false;
+    }
+  }
+
+  @action
+  async reconnectProvider(provider) {
+    if (!this.canShare || this.reconnectingProvider || this.disconnectingProvider) {
+      return;
+    }
+
+    const account = this.settingsAccounts.find((item) => item.provider === provider);
+    if (!account?.connected || account.active !== true) {
+      return;
+    }
+
+    this.reconnectingProvider = provider;
+    this.error = null;
+
+    const label = providerName(provider);
+
+    try {
+      this.me = await ajax(`/live-metrics/api/accounts/${provider}/reconnect`, {
+        type: "PUT",
+      });
+      this.liveAccount = null;
+      this.notice = themeI18n("live_metrics.notices.provider_reconnected", {
+        provider: label,
+      });
+      await this.refreshLiveSections();
+    } catch (error) {
+      this.error =
+        error?.jqXHR?.responseJSON?.message ||
+        themeI18n("live_metrics.errors.provider_reconnect_failed", {
+          provider: label,
+        });
+      await this.loadSettings();
+    } finally {
+      this.reconnectingProvider = null;
     }
   }
 
@@ -1368,9 +1448,16 @@ export default class LiveMetricsPage extends Component {
                             </div>
 
                             {{#if provider.connected}}
-                              <button type="button" class="btn btn-danger" disabled={{provider.disconnecting}} {{on "click" (fn this.disconnectProvider provider.provider)}}>
-                                {{#if provider.disconnecting}}{{this.connectionText.disconnecting}}{{else}}{{this.connectionText.disconnect}}{{/if}}
-                              </button>
+                              <div class="live-metrics-provider-actions">
+                                {{#if provider.can_reconnect}}
+                                  <button type="button" class="btn btn-default" disabled={{provider.reconnect_disabled}} {{on "click" (fn this.reconnectProvider provider.provider)}}>
+                                    {{#if provider.reconnecting}}{{this.connectionText.reconnecting}}{{else}}{{this.connectionText.reconnect}}{{/if}}
+                                  </button>
+                                {{/if}}
+                                <button type="button" class="btn btn-danger" disabled={{provider.disconnect_disabled}} {{on "click" (fn this.disconnectProvider provider.provider)}}>
+                                  {{#if provider.disconnecting}}{{this.connectionText.disconnecting}}{{else}}{{this.connectionText.disconnect}}{{/if}}
+                                </button>
+                              </div>
                             {{else}}
                               {{#if provider.isPulsoid}}
                                 <button type="button" class="btn btn-primary" disabled={{provider.connect_disabled}} {{on "click" this.connectPulsoid}}>
@@ -1379,6 +1466,10 @@ export default class LiveMetricsPage extends Component {
                               {{/if}}
                             {{/if}}
                           </div>
+
+                          {{#if provider.show_reconnect_help}}
+                            <p class="live-metrics-reconnect-help">{{provider.reconnect_help}}</p>
+                          {{/if}}
 
                           {{#unless provider.configured}}
                             <div class="live-metrics-inline-warning live-metrics-inline-warning--compact">

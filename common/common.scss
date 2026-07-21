@@ -533,6 +533,10 @@
 }
 
 @media screen and (max-width: 760px) {
+  .live-metrics-provider-actions {
+    justify-content: flex-start;
+  }
+
   .live-metrics-connect-form {
     grid-template-columns: 1fr;
 
@@ -549,6 +553,20 @@
   margin-top: 0.2rem;
   color: var(--danger);
   line-height: 1.35;
+}
+
+.live-metrics-provider-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.live-metrics-reconnect-help {
+  margin: -0.25rem 0 0;
+  color: var(--primary-medium);
+  font-size: var(--font-down-1);
+  line-height: 1.4;
 }
 
 .live-metrics-provider-card--active {

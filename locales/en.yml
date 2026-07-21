@@ -25,6 +25,8 @@ en:
       not_configured: "Not configured yet"
       disconnecting: "Disconnecting…"
       disconnect: "Disconnect"
+      reconnecting: "Reconnecting…"
+      reconnect: "Reconnect now"
       connect_pulsoid: "Connect your Pulsoid account"
       configuration_missing: "%{provider} is enabled, but the required server-side settings are not configured yet."
       hyperate_device_id: "HypeRate device ID"
@@ -32,11 +34,14 @@ en:
       hyperate_device_help: "Use the device/user ID provided by HypeRate. The site API key stays server-side."
       connecting: "Connecting…"
       connect_hyperate: "Connect HypeRate"
+      hyperate_reconnect_help: "No heart rate showing? Automatic recovery may take up to 5 minutes."
+      pulsoid_reconnect_help: "No heart rate showing? We keep trying automatically."
     notices:
       pulsoid_connected: "Pulsoid connected and selected as your active provider."
       hyperate_connected: "HypeRate connected and selected as your active provider."
       provider_disconnected: "%{provider} disconnected."
       provider_activated: "%{provider} is now your active provider."
+      provider_reconnected: "%{provider} connection restarted. New heart-rate data may take a moment to appear."
     errors:
       pulsoid_not_configured: "Pulsoid is not configured yet. An administrator must add the OAuth client ID and secret first."
       oauth_state_mismatch: "Pulsoid could not be connected because the OAuth session expired. Please try again."
@@ -53,6 +58,7 @@ en:
       hyperate_connect_failed: "HypeRate could not be connected. Check the device ID and try again."
       provider_disconnect_failed: "%{provider} could not be disconnected. Please try again."
       provider_activation_failed: "Your active provider could not be changed."
+      provider_reconnect_failed: "%{provider} could not be reconnected. Please try again."
     owner_status:
       subscription_required: "Pulsoid subscription required. Check your Pulsoid plan."
       scope_required: "Pulsoid permission is incomplete. Reconnect your account."
