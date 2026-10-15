@@ -13,6 +13,7 @@ import { themePrefix } from "virtual:theme";
 const PROVIDER_ORDER = ["pulsoid", "hyperate"];
 const URL_ERROR_DISMISS_MS = 20_000;
 const URL_NOTICE_DISMISS_MS = 10_000;
+const ACTIVITY_NOTICE_DISMISS_MS = 6_000;
 const LIVE_METRICS_STATUS_EVENT = "hb-live-metrics:status-update";
 const DEFAULT_VISIBILITY_OPTIONS = [
   { id: "private", label: "Only me" },
@@ -294,6 +295,8 @@ export default class LiveMetricsPage extends Component {
   @tracked activityText = "";
   @tracked activityDuration = "240";
   @tracked savingActivity = false;
+  @tracked activityNotice = null;
+  @tracked activityError = null;
   @tracked audienceQuery = "";
   @tracked audienceSuggestions = [];
   @tracked audienceSearching = false;
@@ -308,6 +311,7 @@ export default class LiveMetricsPage extends Component {
   clockTimer = null;
   errorDismissTimer = null;
   noticeDismissTimer = null;
+  activityNoticeTimer = null;
   refreshSequence = 0;
   audienceSearchSequence = 0;
   hasUrlError = false;
@@ -603,7 +607,8 @@ export default class LiveMetricsPage extends Component {
     event?.preventDefault?.();
     if (!this.canSaveActivity) { return; }
     this.savingActivity = true;
-    this.error = null;
+    this.activityError = null;
+    this.clearActivityNotice();
     try {
       const custom = this.activitySelection === "__custom__";
       const result = await ajax("/live-metrics/api/me/activity", {
@@ -620,9 +625,9 @@ export default class LiveMetricsPage extends Component {
       if (this.liveAccount) { this.liveAccount = { ...this.liveAccount, activity: result.activity }; }
       this.syncActivityForm(result.activity);
       this.refreshLiveSections();
-      this.notice = "Activity updated.";
+      this.showActivityNotice("Activity updated.");
     } catch (error) {
-      this.error = error?.jqXHR?.responseJSON?.message || "Your activity could not be saved.";
+      this.activityError = error?.jqXHR?.responseJSON?.message || "Your activity could not be saved.";
     } finally {
       this.savingActivity = false;
     }
@@ -632,16 +637,17 @@ export default class LiveMetricsPage extends Component {
   async clearActivity() {
     if (this.savingActivity) { return; }
     this.savingActivity = true;
-    this.error = null;
+    this.activityError = null;
+    this.clearActivityNotice();
     try {
       await ajax("/live-metrics/api/me/activity", { type: "DELETE" });
       this.me = { ...this.me, activity: null };
       if (this.liveAccount) { this.liveAccount = { ...this.liveAccount, activity: null }; }
       this.syncActivityForm(null);
       this.refreshLiveSections();
-      this.notice = "Activity cleared.";
+      this.showActivityNotice("Activity cleared.");
     } catch (error) {
-      this.error = error?.jqXHR?.responseJSON?.message || "Your activity could not be cleared.";
+      this.activityError = error?.jqXHR?.responseJSON?.message || "Your activity could not be cleared.";
     } finally {
       this.savingActivity = false;
     }
@@ -776,8 +782,26 @@ export default class LiveMetricsPage extends Component {
   clearAlertTimers() {
     clearTimeout(this.errorDismissTimer);
     clearTimeout(this.noticeDismissTimer);
+    this.clearActivityNotice();
     this.errorDismissTimer = null;
     this.noticeDismissTimer = null;
+  }
+
+  clearActivityNotice() {
+    clearTimeout(this.activityNoticeTimer);
+    this.activityNoticeTimer = null;
+    this.activityNotice = null;
+  }
+
+  showActivityNotice(message) {
+    this.clearActivityNotice();
+    this.activityNotice = message;
+    this.activityNoticeTimer = setTimeout(() => {
+      if (this.activityNotice === message) {
+        this.activityNotice = null;
+      }
+      this.activityNoticeTimer = null;
+    }, ACTIVITY_NOTICE_DISMISS_MS);
   }
 
   scheduleErrorDismiss(message) {
@@ -1431,55 +1455,6 @@ export default class LiveMetricsPage extends Component {
         </div>
       </section>
 
-      {{#if this.activityEnabled}}
-        <section class="live-metrics-card live-metrics-activity-panel" aria-label="Set your activity">
-          <div class="live-metrics-activity-panel__heading">
-            <div>
-              <h2>What are you doing?</h2>
-              <p>Give members some context for your live heart rate.</p>
-            </div>
-          </div>
-          <form class="live-metrics-activity-form" {{on "submit" this.saveActivity}}>
-            <label class="live-metrics-activity-field">
-              <span>Activity</span>
-              <select value={{this.activitySelection}} {{on "change" this.changeActivity}}>
-                {{#each this.activityChoices as |choice|}}
-                  <option value={{choice.value}} selected={{eq this.activitySelection choice.value}}>{{choice.label}}</option>
-                {{/each}}
-              </select>
-            </label>
-            {{#if this.activityTextEnabled}}
-              <label class="live-metrics-activity-field">
-                <span>{{if (eq this.activitySelection "__custom__") "Describe your activity" "Additional details (optional)"}}</span>
-                <input
-                  type="text"
-                  value={{this.activityText}}
-                  maxlength={{this.activityConfig.max_text_length}}
-                  placeholder={{if (eq this.activitySelection "__custom__") "What are you doing?" "E.g. Weightlifting"}}
-                  {{on "input" this.changeActivityText}}
-                />
-                <small>{{this.activityText.length}}/{{this.activityConfig.max_text_length}} characters</small>
-              </label>
-            {{/if}}
-            {{#if (eq this.activityConfig.expiry_mode "user_selectable")}}
-              <label class="live-metrics-activity-field">
-                <span>Duration</span>
-                <select value={{this.activityDuration}} {{on "change" this.changeActivityDuration}}>
-                  {{#each this.activityDurations as |duration|}}
-                    <option value={{duration.value}} selected={{eq this.activityDuration duration.value}}>{{duration.label}}</option>
-                  {{/each}}
-                </select>
-              </label>
-            {{/if}}
-            <div class="live-metrics-activity-actions">
-              <button type="submit" class="btn btn-primary" disabled={{not this.canSaveActivity}}>{{if this.savingActivity "Saving…" "Save activity"}}</button>
-              {{#if this.hasCurrentActivity}}
-                <button type="button" class="btn btn-default" disabled={{this.savingActivity}} {{on "click" this.clearActivity}}>Clear activity</button>
-              {{/if}}
-            </div>
-          </form>
-        </section>
-      {{/if}}
 
       {{#if this.notice}}
         <div
@@ -1969,6 +1944,66 @@ export default class LiveMetricsPage extends Component {
             </div>
           {{/if}}
         </section>
+      {{#if this.activityEnabled}}
+        <section class="live-metrics-card live-metrics-activity-panel" aria-label="Set your activity">
+          <div class="live-metrics-activity-panel__heading">
+            <div>
+              <h2>What are you doing?</h2>
+              <p>Give members some context for your live heart rate.</p>
+            </div>
+          </div>
+          <form class="live-metrics-activity-form {{if this.activityTextEnabled "live-metrics-activity-form--with-details"}} {{if (not (eq this.activityConfig.expiry_mode "user_selectable")) "live-metrics-activity-form--without-duration"}}" {{on "submit" this.saveActivity}}>
+            <label class="live-metrics-activity-field live-metrics-activity-field--selection">
+              <span>Activity</span>
+              <select value={{this.activitySelection}} {{on "change" this.changeActivity}}>
+                {{#each this.activityChoices as |choice|}}
+                  <option value={{choice.value}} selected={{eq this.activitySelection choice.value}}>{{choice.label}}</option>
+                {{/each}}
+              </select>
+            </label>
+            {{#if this.activityTextEnabled}}
+              <label class="live-metrics-activity-field live-metrics-activity-field--details">
+                <span>{{if (eq this.activitySelection "__custom__") "Describe your activity" "Additional details (optional)"}}</span>
+                <input
+                  type="text"
+                  value={{this.activityText}}
+                  maxlength={{this.activityConfig.max_text_length}}
+                  placeholder={{if (eq this.activitySelection "__custom__") "What are you doing?" "Add a short description"}}
+                  {{on "input" this.changeActivityText}}
+                />
+                <small>{{this.activityText.length}}/{{this.activityConfig.max_text_length}} characters</small>
+              </label>
+            {{/if}}
+            {{#if (eq this.activityConfig.expiry_mode "user_selectable")}}
+              <label class="live-metrics-activity-field live-metrics-activity-field--duration">
+                <span>Duration</span>
+                <select value={{this.activityDuration}} {{on "change" this.changeActivityDuration}}>
+                  {{#each this.activityDurations as |duration|}}
+                    <option value={{duration.value}} selected={{eq this.activityDuration duration.value}}>{{duration.label}}</option>
+                  {{/each}}
+                </select>
+              </label>
+            {{/if}}
+            <div class="live-metrics-activity-actions">
+              <span class="live-metrics-activity-actions__spacer" aria-hidden="true">Action</span>
+              <div class="live-metrics-activity-actions__buttons">
+                <button type="submit" class="btn btn-primary" disabled={{not this.canSaveActivity}}>{{if this.savingActivity "Saving…" "Save activity"}}</button>
+                {{#if this.hasCurrentActivity}}
+                  <button type="button" class="btn btn-default" disabled={{this.savingActivity}} {{on "click" this.clearActivity}}>Clear activity</button>
+                {{/if}}
+              </div>
+              <div class="live-metrics-activity-feedback" role="status" aria-live="polite" aria-atomic="true">
+                {{#if this.activityNotice}}
+                  <span class="live-metrics-activity-feedback__success">{{this.activityNotice}}</span>
+                {{/if}}
+              </div>
+            </div>
+          </form>
+          {{#if this.activityError}}
+            <div class="live-metrics-activity-error" role="alert">{{this.activityError}}</div>
+          {{/if}}
+        </section>
+      {{/if}}
       {{/if}}
     </div>
   </template>

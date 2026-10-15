@@ -989,9 +989,9 @@
   outline-offset: -2px;
 }
 
-// Activity controls sit below the existing preview, leaving provider cards untouched.
+// Activity management is a separate card below Manage my heartrate sharing.
 .live-metrics-activity-panel {
-  margin-bottom: 1rem;
+  margin-top: 1rem;
 }
 
 .live-metrics-activity-panel__heading {
@@ -999,26 +999,49 @@
   p { color: var(--primary-medium); margin-bottom: 0.9rem; }
 }
 
+// Keep all labels and input tops aligned regardless of the details character count.
 .live-metrics-activity-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
+  display: grid;
+  grid-template-columns: minmax(0, 270px) minmax(0, 220px) max-content;
+  grid-template-areas: "activity duration actions";
+  align-items: start;
   gap: 0.75rem;
+}
+
+.live-metrics-activity-form--with-details {
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.8fr) minmax(0, 0.85fr) max-content;
+  grid-template-areas: "activity details duration actions";
+}
+
+// Keep all admin expiration modes usable, including when Duration is hidden.
+.live-metrics-activity-form--without-duration {
+  grid-template-columns: minmax(0, 270px) max-content;
+  grid-template-areas: "activity actions";
+}
+
+.live-metrics-activity-form--with-details.live-metrics-activity-form--without-duration {
+  grid-template-columns: minmax(0, 270px) minmax(0, 500px) max-content;
+  grid-template-areas: "activity details actions";
 }
 
 .live-metrics-activity-field {
   display: flex;
-  flex: 1 1 190px;
   flex-direction: column;
   gap: 0.35rem;
   min-width: 0;
   color: var(--primary);
   font-weight: 600;
 
+  > span {
+    line-height: 1.45;
+  }
+
   select, input {
     box-sizing: border-box;
     width: 100%;
+    min-width: 0;
     min-height: 38px;
+    margin: 0;
     border: 1px solid var(--primary-low);
     border-radius: 6px;
     padding: 0.35rem 0.5rem;
@@ -1028,15 +1051,117 @@
     font-weight: 400;
   }
 
-  small { color: var(--primary-medium); font-weight: 400; }
+  small {
+    color: var(--primary-medium);
+    font-weight: 400;
+    line-height: 1.35;
+  }
 }
 
+.live-metrics-activity-field--selection { grid-area: activity; }
+.live-metrics-activity-field--details { grid-area: details; }
+.live-metrics-activity-field--duration { grid-area: duration; }
+
 .live-metrics-activity-actions {
+  grid-area: actions;
   display: flex;
-  flex: 0 1 auto;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.live-metrics-activity-actions__spacer {
+  visibility: hidden;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.live-metrics-activity-actions__buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 0.5rem;
-  flex-wrap: wrap;
+
+  .btn {
+    white-space: nowrap;
+  }
+}
+
+// A permanent, small status slot avoids layout jumps when confirmation appears.
+.live-metrics-activity-feedback {
+  min-height: 1.35em;
+  color: var(--success);
+  font-size: var(--font-down-2);
+  line-height: 1.35;
+}
+
+.live-metrics-activity-feedback__success::before {
+  content: "✓";
+  margin-right: 0.3em;
+}
+
+.live-metrics-activity-error {
+  margin-top: 0.75rem;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+@media screen and (max-width: 950px) {
+  .live-metrics-activity-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "activity duration" "actions actions";
+  }
+
+  .live-metrics-activity-form--with-details {
+    grid-template-areas: "activity duration" "details details" "actions actions";
+  }
+
+  .live-metrics-activity-form--without-duration {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "activity activity" "actions actions";
+  }
+
+  .live-metrics-activity-form--with-details.live-metrics-activity-form--without-duration {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "activity details" "actions actions";
+  }
+
+  .live-metrics-activity-actions__spacer {
+    display: none;
+  }
+}
+
+@media screen and (max-width: 600px) {
+  .live-metrics-activity-form,
+  .live-metrics-activity-form--with-details {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "activity" "details" "duration" "actions";
+  }
+
+  .live-metrics-activity-form:not(.live-metrics-activity-form--with-details) {
+    grid-template-areas: "activity" "duration" "actions";
+  }
+
+  .live-metrics-activity-form--without-duration:not(.live-metrics-activity-form--with-details) {
+    grid-template-areas: "activity" "actions";
+  }
+
+  .live-metrics-activity-form--with-details.live-metrics-activity-form--without-duration {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "activity" "details" "actions";
+  }
+
+  .live-metrics-activity-actions,
+  .live-metrics-activity-actions__buttons,
+  .live-metrics-activity-actions__buttons .btn {
+    width: 100%;
+  }
+
+  .live-metrics-activity-actions__buttons {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 .live-metrics-bpm__activity {
@@ -1045,8 +1170,9 @@
   font-size: var(--font-down-1);
 }
 
-// All visible overview cards get the same activity row when any member has
-// an activity. If nobody has one, suppress the row to retain compact cards.
+// Add the activity row only when someone shares an activity, retaining the
+// original compact cards otherwise. The flexible middle row keeps BPM lines
+// aligned in a grid row, even if another member has two lines of activity.
 .live-metrics-person-card__activity {
   display: none;
   grid-column: 1 / -1;
@@ -1061,9 +1187,20 @@
 }
 
 .live-metrics-directory__grid:has(.live-metrics-person-card__activity--filled) {
+  .live-metrics-person-card {
+    grid-template-rows: auto minmax(1.35em, 1fr) auto;
+    row-gap: 0.4rem;
+  }
+
   .live-metrics-person-card__activity {
     display: -webkit-box;
-    height: 2.7em;
+    max-height: 2.7em;
+    align-self: start;
+  }
+
+  .live-metrics-person-card__reading {
+    margin-top: 0;
+    padding-top: 0.5rem;
   }
 }
 
