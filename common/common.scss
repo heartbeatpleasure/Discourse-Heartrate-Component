@@ -988,3 +988,94 @@
   outline: 2px solid var(--tertiary);
   outline-offset: -2px;
 }
+
+// Activity controls sit below the existing preview, leaving provider cards untouched.
+.live-metrics-activity-panel {
+  margin-bottom: 1rem;
+}
+
+.live-metrics-activity-panel__heading {
+  h2 { margin-bottom: 0.25rem; }
+  p { color: var(--primary-medium); margin-bottom: 0.9rem; }
+}
+
+.live-metrics-activity-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.live-metrics-activity-field {
+  display: flex;
+  flex: 1 1 190px;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  color: var(--primary);
+  font-weight: 600;
+
+  select, input {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 38px;
+    border: 1px solid var(--primary-low);
+    border-radius: 6px;
+    padding: 0.35rem 0.5rem;
+    color: var(--primary);
+    background: var(--secondary);
+    font: inherit;
+    font-weight: 400;
+  }
+
+  small { color: var(--primary-medium); font-weight: 400; }
+}
+
+.live-metrics-activity-actions {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.live-metrics-bpm__activity {
+  color: var(--primary);
+  overflow-wrap: anywhere;
+  font-size: var(--font-down-1);
+}
+
+// All visible overview cards get the same activity row when any member has
+// an activity. If nobody has one, suppress the row to retain compact cards.
+.live-metrics-person-card__activity {
+  display: none;
+  grid-column: 1 / -1;
+  min-width: 0;
+  color: var(--primary-medium);
+  font-size: var(--font-down-1);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.live-metrics-directory__grid:has(.live-metrics-person-card__activity--filled) {
+  .live-metrics-person-card__activity {
+    display: -webkit-box;
+    height: 2.7em;
+  }
+}
+
+.live-metrics-user-card-reading__activity {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: 0.3rem;
+  color: var(--primary-medium);
+  font-size: var(--font-down-1);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

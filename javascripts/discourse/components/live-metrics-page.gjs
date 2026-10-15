@@ -4,6 +4,7 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 import { on } from "@ember/modifier";
 import { fn } from "@ember/helper";
+import { eq, not } from "truth-helpers";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
 import { ajax } from "discourse/lib/ajax";
 import { i18n } from "discourse-i18n";
@@ -289,6 +290,10 @@ export default class LiveMetricsPage extends Component {
   @tracked nowMs = Date.now();
   @tracked hyperateDeviceId = "";
   @tracked settingsOpen = false;
+  @tracked activitySelection = "";
+  @tracked activityText = "";
+  @tracked activityDuration = "240";
+  @tracked savingActivity = false;
   @tracked audienceQuery = "";
   @tracked audienceSuggestions = [];
   @tracked audienceSearching = false;
@@ -500,6 +505,146 @@ export default class LiveMetricsPage extends Component {
   get hyperateConnectDisabled() {
     const provider = this.config?.providers?.hyperate;
     return provider?.configured !== true || !this.canShare || this.connectingHyperate || this.databaseNotReady || this.hyperateDeviceId.trim().length === 0;
+  }
+
+  get activityConfig() {
+    return this.config?.activities || {};
+  }
+
+  get activityEnabled() {
+    return this.activityConfig.enabled === true && this.canShare && this.rawAccounts.some((account) => account.connected);
+  }
+
+  get activityChoices() {
+    const choices = [{ value: "", label: "Select an activity" }];
+    if (this.activityConfig.predefined_enabled) {
+      for (const label of this.activityConfig.options || []) {
+        choices.push({ value: label, label });
+      }
+    }
+    if (this.activityConfig.custom_enabled) {
+      choices.push({ value: "__custom__", label: "Custom activity…" });
+    }
+    return choices;
+  }
+
+  get activityTextEnabled() {
+    return this.activitySelection === "__custom__" || (
+      Boolean(this.activitySelection) && this.activityConfig.details_enabled
+    );
+  }
+
+  get activityPreviewText() {
+    return this.account?.live?.status === "live" ? (this.account?.activity?.text || null) : null;
+  }
+
+  get hasCurrentActivity() {
+    const activity = this.me?.activity;
+    if (!activity) { return false; }
+    return !activity.expires_at || Date.parse(activity.expires_at) > this.nowMs;
+  }
+
+  get activityDurations() {
+    const names = {
+      30: "30 minutes", 60: "1 hour", 120: "2 hours", 180: "3 hours",
+      240: "4 hours", 360: "6 hours", 480: "8 hours", 600: "10 hours",
+      720: "12 hours", 1440: "24 hours",
+    };
+    const choices = (this.activityConfig.duration_options || []).map((minutes) => ({
+      value: String(minutes), label: names[minutes] || `${minutes} minutes`,
+    }));
+    if (this.activityConfig.allow_no_expiry) {
+      choices.push({ value: "0", label: "Until I clear it" });
+    }
+    return choices;
+  }
+
+  get canSaveActivity() {
+    return this.activitySelection && !this.savingActivity && (
+      this.activitySelection !== "__custom__" || Boolean(this.activityText.trim())
+    );
+  }
+
+  syncActivityForm(activity) {
+    const config = this.activityConfig;
+    const custom = activity?.custom === true;
+    this.activitySelection = custom ? "__custom__" : (activity?.label || "");
+    this.activityText = custom ? (activity?.label || "") : (activity?.details || "");
+    const requested = String(activity?.duration_minutes ?? config.default_duration_minutes ?? 240);
+    const allowed = (config.duration_options || []).map(String);
+    if (config.allow_no_expiry) { allowed.push("0"); }
+    this.activityDuration = allowed.includes(requested)
+      ? requested
+      : String(config.default_duration_minutes ?? 240);
+  }
+
+  @action
+  changeActivity(event) {
+    const label = event.target.value;
+    this.activitySelection = label;
+    this.activityText = "";
+    const minutes = this.activityConfig.default_durations?.[label] ?? this.activityConfig.default_duration_minutes ?? 240;
+    this.activityDuration = String(minutes);
+  }
+
+  @action
+  changeActivityText(event) {
+    this.activityText = Array.from(event.target.value || "")
+      .slice(0, this.activityConfig.max_text_length || 40).join("");
+  }
+
+  @action
+  changeActivityDuration(event) {
+    this.activityDuration = event.target.value;
+  }
+
+  @action
+  async saveActivity(event) {
+    event?.preventDefault?.();
+    if (!this.canSaveActivity) { return; }
+    this.savingActivity = true;
+    this.error = null;
+    try {
+      const custom = this.activitySelection === "__custom__";
+      const result = await ajax("/live-metrics/api/me/activity", {
+        type: "PUT",
+        data: {
+          custom: custom ? "true" : "false",
+          label: custom ? "" : this.activitySelection,
+          text: custom ? this.activityText : "",
+          details: custom ? "" : this.activityText,
+          duration_minutes: this.activityDuration,
+        },
+      });
+      this.me = { ...this.me, activity: result.activity };
+      if (this.liveAccount) { this.liveAccount = { ...this.liveAccount, activity: result.activity }; }
+      this.syncActivityForm(result.activity);
+      this.refreshLiveSections();
+      this.notice = "Activity updated.";
+    } catch (error) {
+      this.error = error?.jqXHR?.responseJSON?.message || "Your activity could not be saved.";
+    } finally {
+      this.savingActivity = false;
+    }
+  }
+
+  @action
+  async clearActivity() {
+    if (this.savingActivity) { return; }
+    this.savingActivity = true;
+    this.error = null;
+    try {
+      await ajax("/live-metrics/api/me/activity", { type: "DELETE" });
+      this.me = { ...this.me, activity: null };
+      if (this.liveAccount) { this.liveAccount = { ...this.liveAccount, activity: null }; }
+      this.syncActivityForm(null);
+      this.refreshLiveSections();
+      this.notice = "Activity cleared.";
+    } catch (error) {
+      this.error = error?.jqXHR?.responseJSON?.message || "Your activity could not be cleared.";
+    } finally {
+      this.savingActivity = false;
+    }
   }
 
   get directoryEnabled() {
@@ -771,6 +916,7 @@ export default class LiveMetricsPage extends Component {
 
       this.config = config;
       this.me = me;
+      this.syncActivityForm(me.activity);
       this.loading = false;
       this.startPolling();
       this.refreshLiveSections();
@@ -788,6 +934,7 @@ export default class LiveMetricsPage extends Component {
 
     this.config = config;
     this.me = me;
+    this.syncActivityForm(me.activity);
   }
 
   async refreshLiveSections() {
@@ -1270,6 +1417,9 @@ export default class LiveMetricsPage extends Component {
               <span class="live-metrics-bpm__label">Your live preview</span>
               <span class="live-metrics-bpm__value">{{this.account.bpm_label}}</span>
               <span class="live-metrics-bpm__meta">{{this.account.provider_label}} · {{this.account.freshness_label}}</span>
+              {{#if this.activityPreviewText}}
+                <span class="live-metrics-bpm__activity">{{this.activityPreviewText}}</span>
+              {{/if}}
             </div>
           {{else}}
             <div class="live-metrics-bpm live-metrics-status--inactive">
@@ -1280,6 +1430,56 @@ export default class LiveMetricsPage extends Component {
           {{/if}}
         </div>
       </section>
+
+      {{#if this.activityEnabled}}
+        <section class="live-metrics-card live-metrics-activity-panel" aria-label="Set your activity">
+          <div class="live-metrics-activity-panel__heading">
+            <div>
+              <h2>What are you doing?</h2>
+              <p>Give members some context for your live heart rate.</p>
+            </div>
+          </div>
+          <form class="live-metrics-activity-form" {{on "submit" this.saveActivity}}>
+            <label class="live-metrics-activity-field">
+              <span>Activity</span>
+              <select value={{this.activitySelection}} {{on "change" this.changeActivity}}>
+                {{#each this.activityChoices as |choice|}}
+                  <option value={{choice.value}} selected={{eq this.activitySelection choice.value}}>{{choice.label}}</option>
+                {{/each}}
+              </select>
+            </label>
+            {{#if this.activityTextEnabled}}
+              <label class="live-metrics-activity-field">
+                <span>{{if (eq this.activitySelection "__custom__") "Describe your activity" "Additional details (optional)"}}</span>
+                <input
+                  type="text"
+                  value={{this.activityText}}
+                  maxlength={{this.activityConfig.max_text_length}}
+                  placeholder={{if (eq this.activitySelection "__custom__") "What are you doing?" "E.g. Weightlifting"}}
+                  {{on "input" this.changeActivityText}}
+                />
+                <small>{{this.activityText.length}}/{{this.activityConfig.max_text_length}} characters</small>
+              </label>
+            {{/if}}
+            {{#if (eq this.activityConfig.expiry_mode "user_selectable")}}
+              <label class="live-metrics-activity-field">
+                <span>Duration</span>
+                <select value={{this.activityDuration}} {{on "change" this.changeActivityDuration}}>
+                  {{#each this.activityDurations as |duration|}}
+                    <option value={{duration.value}} selected={{eq this.activityDuration duration.value}}>{{duration.label}}</option>
+                  {{/each}}
+                </select>
+              </label>
+            {{/if}}
+            <div class="live-metrics-activity-actions">
+              <button type="submit" class="btn btn-primary" disabled={{not this.canSaveActivity}}>{{if this.savingActivity "Saving…" "Save activity"}}</button>
+              {{#if this.hasCurrentActivity}}
+                <button type="button" class="btn btn-default" disabled={{this.savingActivity}} {{on "click" this.clearActivity}}>Clear activity</button>
+              {{/if}}
+            </div>
+          </form>
+        </section>
+      {{/if}}
 
       {{#if this.notice}}
         <div
@@ -1358,6 +1558,11 @@ export default class LiveMetricsPage extends Component {
                       </a>
                       <span class="live-metrics-person-card__provider">{{row.provider_label}}</span>
                     </div>
+                    {{#if this.activityConfig.enabled}}
+                      <div class="live-metrics-person-card__activity {{if row.activity "live-metrics-person-card__activity--filled"}}" title={{row.activity.text}}>
+                        {{#if row.activity}}{{row.activity.text}}{{/if}}
+                      </div>
+                    {{/if}}
                     <div class="live-metrics-person-card__reading {{row.status_class}}">
                       <strong>{{row.bpm_label}}</strong>
                       <span>{{row.freshness_label}}</span>

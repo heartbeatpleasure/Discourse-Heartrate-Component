@@ -17,6 +17,10 @@ export default class LiveHeartRateUserCard extends Component {
     return this.liveMetricsUserCards.readingFor(this.username, this.surface);
   }
 
+  get activityText() {
+    return this.reading?.activity?.text || null;
+  }
+
   get bpmLabel() {
     return this.reading ? `${this.reading.heart_rate} BPM` : "";
   }
@@ -65,6 +69,9 @@ export default class LiveHeartRateUserCard extends Component {
             <span class="live-metrics-user-card-reading__dot" aria-hidden="true"></span>
             Live now
           </span>
+          {{#if this.activityText}}
+            <span class="live-metrics-user-card-reading__activity" title={{this.activityText}}>{{this.activityText}}</span>
+          {{/if}}
         </div>
       {{/if}}
     </div>
