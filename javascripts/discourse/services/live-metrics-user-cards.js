@@ -1,6 +1,6 @@
 import { tracked } from "@glimmer/tracking";
 import Service, { service } from "@ember/service";
-import { ajax } from "discourse/lib/ajax";
+import { isAccessError, liveMetricsRequest } from "../lib/live-metrics-request";
 
 const USER_CARD_SURFACE = "user_card";
 const DIRECTORY_SURFACE = "directory";
@@ -57,6 +57,31 @@ export default class LiveMetricsUserCardsService extends Service {
   blocked = false;
   transientFailureCount = 0;
   retryDelayMs = null;
+  onlineListenerActive = false;
+
+  handleConnectionRestored = () => {
+    if (!this.blocked && this.registrations.size > 0) {
+      if (this.requestInFlight) {
+        this.refreshRequested = true;
+      } else {
+        this.scheduleRefresh(0);
+      }
+    }
+  };
+
+  watchConnection() {
+    if (!this.onlineListenerActive) {
+      window.addEventListener("online", this.handleConnectionRestored);
+      this.onlineListenerActive = true;
+    }
+  }
+
+  unwatchConnection() {
+    if (this.onlineListenerActive) {
+      window.removeEventListener("online", this.handleConnectionRestored);
+      this.onlineListenerActive = false;
+    }
+  }
 
   get enabled() {
     return this.siteSettings?.live_metrics_enabled !== false;
@@ -86,6 +111,7 @@ export default class LiveMetricsUserCardsService extends Service {
       count: (existing?.count || 0) + 1,
     });
 
+    this.watchConnection();
     if (this.requestInFlight) {
       this.refreshRequested = true;
     } else {
@@ -115,6 +141,7 @@ export default class LiveMetricsUserCardsService extends Service {
     }
 
     if (this.registrations.size === 0) {
+      this.unwatchConnection();
       this.stopTimers();
       this.readings = new Map();
       this.refreshRequested = false;
@@ -194,7 +221,7 @@ export default class LiveMetricsUserCardsService extends Service {
     try {
       const responses = await Promise.all(
         requestBatches.map((data) =>
-          ajax("/live-metrics/api/user-cards", { data })
+          liveMetricsRequest("/live-metrics/api/user-cards", { data })
         )
       );
       const nextReadings = new Map();
@@ -214,24 +241,16 @@ export default class LiveMetricsUserCardsService extends Service {
       this.retryDelayMs = null;
       this.scheduleExpiry();
     } catch (error) {
-      const status = Number(error?.jqXHR?.status || error?.status);
-
-      // User-card visibility is privacy-sensitive. Never retain a reading from
-      // an earlier successful request when the current permission check fails or
-      // the endpoint is temporarily unavailable.
-      this.readings = new Map();
-
-      const permanentClientError =
-        status >= 400 && status < 500 && status !== 429;
-
-      if (permanentClientError) {
+      if (isAccessError(error)) {
+        // Permission changes and permanent client errors must fail closed.
+        this.readings = new Map();
         this.blocked = true;
         this.retryDelayMs = null;
         this.stopTimers();
       } else {
-        // Network failures, 429s and temporary 5xx responses must hide the old
-        // value immediately, but should recover automatically without requiring
-        // a full page refresh.
+        // Keep only readings whose expiry was authorized by the last success.
+        // The existing expiry timer removes them even if every retry fails.
+        this.pruneExpiredReadings();
         this.transientFailureCount += 1;
         this.retryDelayMs = this.transientRetryDelayMs(error);
       }
@@ -239,10 +258,12 @@ export default class LiveMetricsUserCardsService extends Service {
       this.requestInFlight = false;
 
       if (!this.blocked && this.registrations.size > 0) {
-        if (this.retryDelayMs !== null) {
-          this.scheduleRefresh(this.retryDelayMs);
-        } else if (this.refreshRequested) {
+        if (this.refreshRequested) {
+          // A registration or an online event arrived during this request:
+          // retry immediately, even when the old request failed offline.
           this.scheduleRefresh(0);
+        } else if (this.retryDelayMs !== null) {
+          this.scheduleRefresh(this.retryDelayMs);
         } else {
           this.scheduleRefresh(this.pollIntervalMs);
         }
@@ -320,6 +341,7 @@ export default class LiveMetricsUserCardsService extends Service {
       super.willDestroy(...arguments);
     }
 
+    this.unwatchConnection();
     this.stopTimers();
   }
 }

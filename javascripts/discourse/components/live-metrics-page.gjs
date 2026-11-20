@@ -7,6 +7,7 @@ import { fn } from "@ember/helper";
 import { eq, not } from "truth-helpers";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
 import { ajax } from "discourse/lib/ajax";
+import { isAccessError, liveMetricsRequest } from "../lib/live-metrics-request";
 import { i18n } from "discourse-i18n";
 import { themePrefix } from "virtual:theme";
 
@@ -44,7 +45,41 @@ function providerName(provider) {
   return String(provider || "");
 }
 
-function publishDirectoryCount(rows) {
+const DEFAULT_LIVE_THRESHOLD_MS = 20_000;
+
+// Use the server's existing live-threshold setting when provided. The fallback
+// maintains compatibility with older plugin releases that do not expose it.
+function liveThresholdMs(config) {
+  const seconds = Number(config?.live_threshold_seconds);
+  return Number.isFinite(seconds) && seconds >= 3 && seconds <= 120
+    ? seconds * 1000
+    : DEFAULT_LIVE_THRESHOLD_MS;
+}
+
+function readingExpiryMs(live, receivedAtMs, thresholdMs) {
+  if (live?.status !== "live" || !(Number(live?.heart_rate) > 0)) {
+    return 0;
+  }
+
+  const measuredAtMs = Number(live.measured_at_ms);
+  const parsedAtMs = Date.parse(live.measured_at || "");
+  let observedAtMs = Number.isFinite(measuredAtMs) && measuredAtMs > 0
+    ? measuredAtMs
+    : Number.isFinite(parsedAtMs) ? parsedAtMs : 0;
+
+  if (!observedAtMs && Number.isFinite(Number(live.age_seconds))) {
+    observedAtMs = receivedAtMs - Math.max(Number(live.age_seconds), 0) * 1000;
+  }
+
+  // Never extend a cached reading beyond the last successful permission check.
+  return Math.min((observedAtMs || receivedAtMs) + thresholdMs, receivedAtMs + thresholdMs);
+}
+
+function readingIsCurrent(live, nowMs, receivedAtMs, thresholdMs) {
+  return receivedAtMs > 0 && readingExpiryMs(live, receivedAtMs, thresholdMs) > nowMs;
+}
+
+function publishDirectoryCount(rows, verifiedAtMs, thresholdMs) {
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
     return;
   }
@@ -52,7 +87,7 @@ function publishDirectoryCount(rows) {
   const count = Array.isArray(rows) ? rows.length : 0;
   window.dispatchEvent(
     new CustomEvent(LIVE_METRICS_STATUS_EVENT, {
-      detail: { live: count > 0, count },
+      detail: { live: count > 0, count, verified_at_ms: verifiedAtMs, live_threshold_ms: thresholdMs },
     })
   );
 }
@@ -279,6 +314,9 @@ export default class LiveMetricsPage extends Component {
   @tracked me = null;
   @tracked liveAccount = null;
   @tracked directoryRows = [];
+  @tracked directorySuccessAtMs = 0;
+  @tracked previewSuccessAtMs = 0;
+  @tracked directoryErrorAtMs = 0;
   @tracked loading = true;
   @tracked refreshing = false;
   @tracked savingProvider = null;
@@ -314,6 +352,9 @@ export default class LiveMetricsPage extends Component {
   activityNoticeTimer = null;
   refreshSequence = 0;
   audienceSearchSequence = 0;
+  lastPublishedDirectoryCount = null;
+  initialized = false;
+  initialLoadInFlight = false;
   hasUrlError = false;
 
   willDestroy() {
@@ -378,15 +419,48 @@ export default class LiveMetricsPage extends Component {
     return this.settingsAccounts.find((account) => account.active) || this.settingsAccounts[0] || null;
   }
 
+  get liveWindowMs() {
+    return liveThresholdMs(this.config);
+  }
+
   get account() {
-    return decorateAccount(this.liveAccount || this.activeSettingsAccount, this.nowMs);
+    const account = this.liveAccount || this.activeSettingsAccount;
+    if (this.liveAccount?.live?.status === "live" &&
+        !readingIsCurrent(this.liveAccount.live, this.nowMs, this.previewSuccessAtMs, this.liveWindowMs)) {
+      return decorateAccount({
+        ...account,
+        live: { ...account.live, status: "stale", heart_rate: null },
+      }, this.nowMs);
+    }
+    return decorateAccount(account, this.nowMs);
   }
 
   get directory() {
+    if (this.directorySuccessAtMs <= 0 ||
+        this.nowMs >= this.directorySuccessAtMs + this.liveWindowMs) {
+      return [];
+    }
+
     return (this.directoryRows || [])
+      .filter((row) => readingIsCurrent(row?.live, this.nowMs, this.directorySuccessAtMs, this.liveWindowMs))
       .map((row) => decorateAccount(row, this.nowMs))
-      .filter((row) => row?.live?.status === "live" && row?.live?.heart_rate)
       .sort(compareDirectoryAccounts);
+  }
+
+  get directoryTemporarilyUnavailable() {
+    if (!this.directoryErrorAtMs || this.config?.directory_enabled === false) {
+      return false;
+    }
+    const lastCheck = this.directorySuccessAtMs || this.directoryErrorAtMs;
+    return this.nowMs >= lastCheck + this.liveWindowMs;
+  }
+
+  publishCurrentDirectoryCount() {
+    const rows = this.directory;
+    if (this.lastPublishedDirectoryCount !== rows.length) {
+      this.lastPublishedDirectoryCount = rows.length;
+      publishDirectoryCount(rows, this.directorySuccessAtMs, this.liveWindowMs);
+    }
   }
 
   get providerRows() {
@@ -764,6 +838,9 @@ export default class LiveMetricsPage extends Component {
 
   @action
   setup() {
+    this.initialized = true;
+    window.addEventListener("online", this.handleConnectionRestored);
+    document.addEventListener("visibilitychange", this.handleVisibilityChange);
     this.readUrlNotice();
     this.startClock();
     this.loadInitial();
@@ -771,6 +848,9 @@ export default class LiveMetricsPage extends Component {
 
   @action
   cleanup() {
+    this.initialized = false;
+    window.removeEventListener("online", this.handleConnectionRestored);
+    document.removeEventListener("visibilitychange", this.handleVisibilityChange);
     this.refreshSequence += 1;
     this.audienceSearchSequence += 1;
     this.stopPolling();
@@ -926,27 +1006,67 @@ export default class LiveMetricsPage extends Component {
     }
   }
 
-  async loadInitial() {
-    if (!this.hasUrlError) {
-      this.error = null;
+  @action
+  handleConnectionRestored() {
+    if (!this.initialized) {
+      return;
     }
-    this.loading = true;
+    this.stopPolling();
+    if (!this.config) {
+      this.loadInitial({ retry: true });
+    } else {
+      this.refreshLiveSections();
+    }
+  }
+
+  @action
+  handleVisibilityChange() {
+    if (!document.hidden) {
+      this.handleConnectionRestored();
+    }
+  }
+
+  async loadInitial({ retry = false } = {}) {
+    if (!this.initialized || this.initialLoadInFlight) {
+      return;
+    }
+    this.initialLoadInFlight = true;
+    if (!retry) {
+      if (!this.hasUrlError) {
+        this.error = null;
+      }
+      this.loading = true;
+    }
 
     try {
       const [config, me] = await Promise.all([
-        ajax("/live-metrics/api/config"),
-        ajax("/live-metrics/api/me"),
+        liveMetricsRequest("/live-metrics/api/config"),
+        liveMetricsRequest("/live-metrics/api/me"),
       ]);
+      if (!this.initialized) {
+        return;
+      }
 
       this.config = config;
       this.me = me;
       this.syncActivityForm(me.activity);
       this.loading = false;
-      this.startPolling();
+      if (this.error === themeI18n("live_metrics.errors.settings_load_failed")) {
+        this.error = null;
+      }
       this.refreshLiveSections();
     } catch {
-      this.error = themeI18n("live_metrics.errors.settings_load_failed");
-      this.loading = false;
+      if (this.initialized) {
+        if (!retry) {
+          this.error = themeI18n("live_metrics.errors.settings_load_failed");
+        }
+        this.loading = false;
+      }
+    } finally {
+      this.initialLoadInFlight = false;
+      if (this.initialized && !this.config) {
+        this.startPolling();
+      }
     }
   }
 
@@ -962,39 +1082,55 @@ export default class LiveMetricsPage extends Component {
   }
 
   async refreshLiveSections() {
-    if (!this.config) {
+    if (!this.initialized || !this.config) {
       return;
     }
 
+    this.stopPolling();
     const refreshSequence = ++this.refreshSequence;
     this.refreshing = true;
 
     try {
-      const liveRequest = ajax("/live-metrics/api/live-preview");
-      const directoryRequest = this.config?.directory_enabled === false ? Promise.resolve({ users: [] }) : ajax("/live-metrics/api/directory");
+      const liveRequest = liveMetricsRequest("/live-metrics/api/live-preview");
+      const directoryRequest = this.config.directory_enabled === false
+        ? Promise.resolve({ users: [] })
+        : liveMetricsRequest("/live-metrics/api/directory");
       const [liveResult, directoryResult] = await Promise.allSettled([liveRequest, directoryRequest]);
 
-      // Ignore an older response if a newer refresh has already started. This
-      // prevents stale visibility data from overwriting a newer result.
-      if (refreshSequence !== this.refreshSequence) {
+      // Ignore older responses, including responses from a suspended tab or
+      // an earlier network connection, after a newer refresh has started.
+      if (!this.initialized || refreshSequence !== this.refreshSequence) {
         return;
       }
 
+      this.nowMs = Date.now();
       if (liveResult.status === "fulfilled") {
         this.liveAccount = liveResult.value?.account || null;
+        this.previewSuccessAtMs = this.nowMs;
+      } else if (isAccessError(liveResult.reason)) {
+        this.liveAccount = null;
+        this.previewSuccessAtMs = 0;
       }
 
-      // Directory visibility is privacy-sensitive. On an API error, clear the
-      // previous rows instead of retaining data from an earlier successful poll.
-      this.directoryRows =
-        directoryResult.status === "fulfilled"
-          ? directoryResult.value?.users || []
+      if (directoryResult.status === "fulfilled") {
+        // A successful response (including an empty directory) replaces the
+        // cached rows: server permissions and visibility always take priority.
+        this.directoryRows = Array.isArray(directoryResult.value?.users)
+          ? directoryResult.value.users
           : [];
-      publishDirectoryCount(this.directoryRows);
-
-      this.nowMs = Date.now();
+        this.directorySuccessAtMs = this.nowMs;
+        this.directoryErrorAtMs = 0;
+      } else if (isAccessError(directoryResult.reason) || this.config.directory_enabled === false) {
+        // 401/403/404 and other non-429 4xx errors must fail closed.
+        this.directoryRows = [];
+        this.directorySuccessAtMs = 0;
+        this.directoryErrorAtMs = 0;
+      } else if (!this.directoryErrorAtMs) {
+        this.directoryErrorAtMs = this.nowMs;
+      }
+      this.publishCurrentDirectoryCount();
     } finally {
-      if (refreshSequence === this.refreshSequence) {
+      if (this.initialized && refreshSequence === this.refreshSequence) {
         this.refreshing = false;
         this.startPolling();
       }
@@ -1002,9 +1138,17 @@ export default class LiveMetricsPage extends Component {
   }
 
   startPolling() {
+    if (!this.initialized) {
+      return;
+    }
     this.stopPolling();
     this.pollTimer = window.setTimeout(() => {
-      this.refreshLiveSections();
+      this.pollTimer = null;
+      if (this.config) {
+        this.refreshLiveSections();
+      } else {
+        this.loadInitial({ retry: true });
+      }
     }, this.pollIntervalMs);
   }
 
@@ -1013,6 +1157,7 @@ export default class LiveMetricsPage extends Component {
     this.nowMs = Date.now();
     this.clockTimer = window.setInterval(() => {
       this.nowMs = Date.now();
+      this.publishCurrentDirectoryCount();
     }, 1000);
   }
 
@@ -1559,8 +1704,13 @@ export default class LiveMetricsPage extends Component {
               </div>
             {{else}}
               <div class="live-metrics-empty-state live-metrics-empty-state--small">
-                <h3>No live heart-rate data right now</h3>
-                <p>Members will appear here when they enable sharing and their active provider has a recent signal.</p>
+                {{#if this.directoryTemporarilyUnavailable}}
+                  <h3>Heartrate data temporarily unavailable</h3>
+                  <p>We're reconnecting automatically. Current readings will return when the connection is restored.</p>
+                {{else}}
+                  <h3>No live heart-rate data right now</h3>
+                  <p>Members will appear here when they enable sharing and their active provider has a recent signal.</p>
+                {{/if}}
               </div>
             {{/if}}
           </section>
